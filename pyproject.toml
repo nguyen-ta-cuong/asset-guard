@@ -1,7 +1,7 @@
 [project]
 name = "asset-guard"
 version = "0.1.0"
-description = "Add your description here"
+description = "CLI tool to audit unused and broken image assets in Xcode projects"
 readme = "README.md"
 authors = [
     { name = "cuong", email = "nguyentacuong90@gmail.com" }
