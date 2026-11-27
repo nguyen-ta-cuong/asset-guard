@@ -13,6 +13,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from asset_guard.models import AuditReport
+from asset_guard.scanner import AssetScanner
 
 EXIT_SUCCESS = 0
 EXIT_ISSUES_FOUND = 1
@@ -162,17 +163,9 @@ def _format_bytes(size_bytes: int) -> str:
     return f"{size:.1f} GB"  # pragma: no cover
 
 
-def run_audit(xassets_path: Path, source_path: Path) -> AuditReport:
-    """Execute the asset audit for the given catalog and source directory.
-
-    Delegates to the scanner once `asset_guard.scanner` is implemented.
-    """
-    return AuditReport(
-        xassets_path=xassets_path,
-        source_path=source_path,
-        total_assets=0,
-        used_assets_count=0,
-    )
+def run_audit(xcassets_path: Path, source_path: Path) -> AuditReport:
+    """Execute the asset audit using `AssetScanner`."""
+    return AssetScanner().scan(xcassets_path, source_path)
 
 
 def _render_text_report(report: AuditReport, console: Console) -> None:
@@ -185,7 +178,7 @@ def _render_text_report(report: AuditReport, console: Console) -> None:
     )
 
     summary_lines = [
-        f"Catalog:       {report.xassets_path}",
+        f"Catalog:       {report.xcassets_path}",
         f"Source:        {report.source_path}",
         f"Total assets:  {report.total_assets}",
         f"Used assets:   {report.used_assets_count}",

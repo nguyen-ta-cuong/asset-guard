@@ -69,7 +69,7 @@ def test_audit_defaults_to_current_working_directory(xcode_project, monkeypatch)
 
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
-    assert payload["xassets_path"] == str(xcassets)
+    assert payload["xcassets_path"] == str(xcassets)
     assert payload["source_path"] == str(project_root)
 
 
@@ -83,14 +83,14 @@ def test_audit_explicit_xcassets_and_source_without_project_path(xcode_project):
 
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
-    assert payload["xassets_path"] == str(xcassets)
+    assert payload["xcassets_path"] == str(xcassets)
     assert payload["source_path"] == str(sources)
 
 
 def test_audit_renders_issues_and_duplicates_in_text_mode(xcode_project, monkeypatch):
     project_root, xcassets, _sources = xcode_project
     report = AuditReport(
-        xassets_path=xcassets,
+        xcassets_path=xcassets,
         source_path=project_root,
         total_assets=4,
         used_assets_count=2,
@@ -124,7 +124,7 @@ def test_audit_renders_issues_and_duplicates_in_text_mode(xcode_project, monkeyp
 def test_audit_json_output_and_verbose_stream_separation(xcode_project, monkeypatch):
     project_root, xcassets, _sources = xcode_project
     report = AuditReport(
-        xassets_path=xcassets,
+        xcassets_path=xcassets,
         source_path=project_root,
         total_assets=3,
         used_assets_count=2,
@@ -154,7 +154,7 @@ def test_fail_on_issues_exit_codes(xcode_project, monkeypatch):
     assert clean_result.exit_code == 0
 
     report_with_issue = AuditReport(
-        xassets_path=xcassets,
+        xcassets_path=xcassets,
         source_path=project_root,
         total_assets=1,
         used_assets_count=0,
@@ -282,3 +282,40 @@ def test_main_delegates_to_app(monkeypatch):
     main()
 
     assert called
+
+
+def test_cli_end_to_end_with_real_scanner(xcode_project):
+    project_root, xcassets, sources = xcode_project
+
+    used_set = xcassets / "app_logo.imageset"
+    used_set.mkdir()
+    (used_set / "logo.svg").write_text("<svg></svg>", encoding="utf-8")
+    (used_set / "Contents.json").write_text(
+        json.dumps({"images": [{"filename": "logo.svg", "idiom": "universal"}]}),
+        encoding="utf-8",
+    )
+
+    unused_set = xcassets / "legacy_icon.imageset"
+    unused_set.mkdir()
+    (unused_set / "icon@2x.png").write_bytes(b"png-bytes-2x")
+    (unused_set / "Contents.json").write_text(
+        json.dumps({"images": [{"filename": "icon@2x.png", "idiom": "universal", "scale": "2x"}]}),
+        encoding="utf-8",
+    )
+
+    (sources / "AppView.swift").write_text(
+        "import SwiftUI\nlet img = Image(.appLogo)\n",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [str(project_root), "--format", "json", "--fail-on-issues"],
+    )
+
+    assert result.exit_code == cli.EXIT_ISSUES_FOUND
+    payload = json.loads(result.stdout)
+    assert payload["summary"]["total_assets"] == 2
+    assert payload["summary"]["used_assets_count"] == 1
+    issue_types = {issue["issue_type"] for issue in payload["issues"]}
+    assert issue_types == {"incomplete_scales", "unused"}

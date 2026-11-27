@@ -17,7 +17,7 @@ def make_report():
         duplicate_images: list[DuplicateImage] | None = None,
     ) -> AuditReport:
         report = AuditReport(
-            xassets_path=Path("MyApp/Assets.xcassets"),
+            xcassets_path=Path("MyApp/Assets.xcassets"),
             source_path=Path("MyApp/Sources"),
             total_assets=total_assets,
             used_assets_count=used_assets_count,
@@ -93,19 +93,19 @@ def test_duplicate_image_wasted_space_bytes(file_size_bytes, file_count, expecte
 
 def test_audit_report_defaults_and_isolation():
     first = AuditReport(
-        xassets_path=Path("MyApp/Assets.xcassets"),
+        xcassets_path=Path("MyApp/Assets.xcassets"),
         source_path=Path("MyApp/Sources"),
         total_assets=10,
         used_assets_count=8,
     )
     second = AuditReport(
-        xassets_path=Path("OtherApp/Assets.xcassets"),
+        xcassets_path=Path("OtherApp/Assets.xcassets"),
         source_path=Path("OtherApp/Sources"),
         total_assets=3,
         used_assets_count=3,
     )
 
-    assert first.xassets_path == Path("MyApp/Assets.xcassets")
+    assert first.xcassets_path == Path("MyApp/Assets.xcassets")
     assert first.source_path == Path("MyApp/Sources")
     assert first.total_assets == 10
     assert first.used_assets_count == 8
@@ -195,7 +195,7 @@ def test_audit_report_to_dict_empty(make_report):
     payload = report.to_dict()
 
     assert payload == {
-        "xassets_path": "MyApp/Assets.xcassets",
+        "xcassets_path": "MyApp/Assets.xcassets",
         "source_path": "MyApp/Sources",
         "total_assets": 4,
         "summary": {
@@ -233,7 +233,7 @@ def test_audit_report_to_dict_populated(make_report):
     payload = report.to_dict()
 
     assert payload == {
-        "xassets_path": "MyApp/Assets.xcassets",
+        "xcassets_path": "MyApp/Assets.xcassets",
         "source_path": "MyApp/Sources",
         "total_assets": 5,
         "summary": {

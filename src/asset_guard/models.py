@@ -1,5 +1,16 @@
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
+
+
+class IssueType(StrEnum):
+    INVALID_JSON = "invalid_json"
+    EMPTY_IMAGESET = "empty_imageset"
+    MISSING_FILE = "missing_file"
+    INVALID_VECTOR = "invalid_vector"
+    INCOMPLETE_SCALES = "incomplete_scales"
+    DUPLICATE_ASSET_NAME = "duplicate_asset_name"
+    UNUSED = "unused"
 
 
 @dataclass(frozen=True)
@@ -23,7 +34,7 @@ class DuplicateImage:
 
 @dataclass
 class AuditReport:
-    xassets_path: Path
+    xcassets_path: Path
     source_path: Path
     total_assets: int
     used_assets_count: int
@@ -32,7 +43,7 @@ class AuditReport:
 
     @property
     def unused_assets(self) -> list[str]:
-        return [issue.asset_name for issue in self.issues if issue.issue_type == "unused"]
+        return [issue.asset_name for issue in self.issues if issue.issue_type == IssueType.UNUSED]
 
     @property
     def total_wasted_space_bytes(self) -> int:
@@ -40,7 +51,7 @@ class AuditReport:
 
     def to_dict(self) -> dict[str, object]:
         return {
-            "xassets_path": str(self.xassets_path),
+            "xcassets_path": str(self.xcassets_path),
             "source_path": str(self.source_path),
             "total_assets": self.total_assets,
             "summary": {
@@ -53,7 +64,7 @@ class AuditReport:
             "issues": [
                 {
                     "asset_name": issue.asset_name,
-                    "issue_type": issue.issue_type,
+                    "issue_type": str(issue.issue_type),
                     "detail": issue.detail,
                     "path": str(issue.path),
                 }
