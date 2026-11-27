@@ -4,7 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from asset_guard.models import AssetIssue, AuditReport, DuplicateImage
+from asset_guard.models import (
+    AssetIssue,
+    AuditReport,
+    DuplicateImage,
+    FindingCategory,
+    IssueType,
+)
 
 
 @pytest.fixture
@@ -17,7 +23,7 @@ def make_report():
         duplicate_images: list[DuplicateImage] | None = None,
     ) -> AuditReport:
         report = AuditReport(
-            xcassets_path=Path("MyApp/Assets.xcassets"),
+            xcassets_paths=[Path("MyApp/Assets.xcassets")],
             source_path=Path("MyApp/Sources"),
             total_assets=total_assets,
             used_assets_count=used_assets_count,
@@ -93,19 +99,19 @@ def test_duplicate_image_wasted_space_bytes(file_size_bytes, file_count, expecte
 
 def test_audit_report_defaults_and_isolation():
     first = AuditReport(
-        xcassets_path=Path("MyApp/Assets.xcassets"),
+        xcassets_paths=[Path("MyApp/Assets.xcassets")],
         source_path=Path("MyApp/Sources"),
         total_assets=10,
         used_assets_count=8,
     )
     second = AuditReport(
-        xcassets_path=Path("OtherApp/Assets.xcassets"),
+        xcassets_paths=[Path("OtherApp/Assets.xcassets")],
         source_path=Path("OtherApp/Sources"),
         total_assets=3,
         used_assets_count=3,
     )
 
-    assert first.xcassets_path == Path("MyApp/Assets.xcassets")
+    assert first.xcassets_paths == [Path("MyApp/Assets.xcassets")]
     assert first.source_path == Path("MyApp/Sources")
     assert first.total_assets == 10
     assert first.used_assets_count == 8
@@ -196,11 +202,14 @@ def test_audit_report_to_dict_empty(make_report):
 
     assert payload == {
         "xcassets_path": "MyApp/Assets.xcassets",
+        "xcassets_paths": ["MyApp/Assets.xcassets"],
         "source_path": "MyApp/Sources",
         "total_assets": 4,
         "summary": {
             "total_assets": 4,
             "used_assets_count": 4,
+            "unused_assets_count": 0,
+            "ignored_assets_count": 0,
             "total_issues": 0,
             "total_duplicate_images": 0,
             "total_wasted_space_bytes": 0,
@@ -234,11 +243,14 @@ def test_audit_report_to_dict_populated(make_report):
 
     assert payload == {
         "xcassets_path": "MyApp/Assets.xcassets",
+        "xcassets_paths": ["MyApp/Assets.xcassets"],
         "source_path": "MyApp/Sources",
         "total_assets": 5,
         "summary": {
             "total_assets": 5,
             "used_assets_count": 4,
+            "unused_assets_count": 0,
+            "ignored_assets_count": 0,
             "total_issues": 1,
             "total_duplicate_images": 1,
             "total_wasted_space_bytes": 2000,
@@ -261,3 +273,40 @@ def test_audit_report_to_dict_populated(make_report):
         ],
     }
     assert json.loads(json.dumps(payload)) == payload
+
+
+@pytest.mark.parametrize(
+    ("issue_type", "category"),
+    [
+        (IssueType.UNUSED, FindingCategory.UNUSED),
+        (IssueType.DUPLICATE_ASSET_NAME, FindingCategory.DUPLICATES),
+        (IssueType.MISSING_FILE, FindingCategory.BROKEN),
+        (IssueType.INVALID_JSON, FindingCategory.BROKEN),
+        (IssueType.INCOMPLETE_SCALES, FindingCategory.BROKEN),
+    ],
+)
+def test_issue_type_category(issue_type, category):
+    assert issue_type.category is category
+
+
+def test_count_by_category_includes_duplicate_images(make_report):
+    report = make_report(
+        issues=[
+            AssetIssue("a", IssueType.UNUSED, "", Path("a.imageset")),
+            AssetIssue("b", "missing_file", "", Path("b.imageset")),
+            AssetIssue("c", IssueType.DUPLICATE_ASSET_NAME, "", Path("c.imageset")),
+        ],
+        duplicate_images=[DuplicateImage("x", 1, [Path("1.png"), Path("2.png")])],
+    )
+
+    assert report.count_by_category() == {
+        FindingCategory.UNUSED: 1,
+        FindingCategory.DUPLICATES: 2,
+        FindingCategory.BROKEN: 1,
+    }
+
+
+def test_to_dict_handles_report_without_catalogs():
+    report = AuditReport(xcassets_paths=[], source_path=Path(), total_assets=0, used_assets_count=0)
+
+    assert report.to_dict()["xcassets_path"] == ""
