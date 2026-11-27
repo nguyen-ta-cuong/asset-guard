@@ -55,10 +55,11 @@ src/asset_guard/
 ├── cleaner.py      # plan_removal (pure), apply_removal (the ONLY place that deletes), git worktree check
 └── reporting.py    # Rich text (audit/clean) and Markdown summary rendering
 tests/              # one test module per source module (tmp_path fixtures, no real Xcode projects)
-action.yml          # composite GitHub Action (setup-uv + uvx --from action path)
-.github/workflows/ci.yml   # lint/test + action smoke test against examples/SampleApp
-examples/SampleApp/        # tiny fake Xcode project covering every reference style
-docs/ci.md                 # user docs: GitHub Actions, Jenkins, exit codes, safety check
+action.yml                      # composite GitHub Action (setup-uv + uvx --from action path)
+.github/workflows/ci.yml        # lint/test + action smoke test against examples/SampleApp
+.github/workflows/publish.yml   # PyPI Trusted Publishing (OIDC) on GitHub Release published
+examples/SampleApp/             # tiny fake Xcode project covering every reference style
+docs/ci.md                      # user docs: GitHub Actions, Jenkins, exit codes, safety check
 ```
 
 ```text
@@ -175,13 +176,10 @@ bug, while an extra match (false "used") is acceptable. Every fix needs a test i
 
 ## Roadmap
 
-1. Release `v0.2.0` (subcommands are a breaking CLI change from 0.1) and tag it, so
-   `uses: …/asset-guard@v0.2.0` and `uvx --from git+…@v0.2.0` can be pinned. Consider
-   publishing to PyPI.
-2. Asset-level duplicate groups, plus an opt-in `dedupe` command that rewrites string
+1. Asset-level duplicate groups, plus an opt-in `dedupe` command that rewrites string
    references to a canonical asset (local use only, never in CI).
-3. More output formats: SARIF (GitHub code scanning) and JUnit XML (Jenkins test UI).
-4. `.colorset` / `.symbolset` support.
+2. More output formats: SARIF (GitHub code scanning) and JUnit XML (Jenkins test UI).
+3. `.colorset` / `.symbolset` support.
 
 ## Git
 
