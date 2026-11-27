@@ -1,7 +1,7 @@
 [project]
 name = "asset-guard"
 version = "0.1.0"
-description = "CLI tool to audit unused and broken image assets in Xcode projects"
+description = "CLI to find and remove unused and duplicate image assets in Xcode projects, built for CI"
 readme = "README.md"
 authors = [
     { name = "cuong", email = "nguyentacuong90@gmail.com" }
@@ -51,6 +51,8 @@ ignore = [
     "S101",    # assert allowed in tests
     "PLR2004", # magic values allowed in tests
     "ANN",     # annotations optional in tests
+    "S603",    # tests run git to build fixture repos
+    "S607",
 ]
 
 [tool.ruff.format]

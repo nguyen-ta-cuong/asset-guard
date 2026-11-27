@@ -3,6 +3,14 @@ from enum import StrEnum
 from pathlib import Path
 
 
+class FindingCategory(StrEnum):
+    """Groups of findings that CI can gate on (`--fail-on`)."""
+
+    UNUSED = "unused"
+    DUPLICATES = "duplicates"
+    BROKEN = "broken"
+
+
 class IssueType(StrEnum):
     INVALID_JSON = "invalid_json"
     EMPTY_IMAGESET = "empty_imageset"
@@ -12,11 +20,19 @@ class IssueType(StrEnum):
     DUPLICATE_ASSET_NAME = "duplicate_asset_name"
     UNUSED = "unused"
 
+    @property
+    def category(self) -> FindingCategory:
+        if self is IssueType.UNUSED:
+            return FindingCategory.UNUSED
+        if self is IssueType.DUPLICATE_ASSET_NAME:
+            return FindingCategory.DUPLICATES
+        return FindingCategory.BROKEN
+
 
 @dataclass(frozen=True)
 class AssetIssue:
     asset_name: str
-    issue_type: str
+    issue_type: IssueType
     detail: str
     path: Path
 
@@ -34,12 +50,13 @@ class DuplicateImage:
 
 @dataclass
 class AuditReport:
-    xcassets_path: Path
+    xcassets_paths: list[Path]
     source_path: Path
     total_assets: int
     used_assets_count: int
     issues: list[AssetIssue] = field(default_factory=list)
     duplicate_images: list[DuplicateImage] = field(default_factory=list)
+    ignored_assets: list[str] = field(default_factory=list)
 
     @property
     def unused_assets(self) -> list[str]:
@@ -49,14 +66,26 @@ class AuditReport:
     def total_wasted_space_bytes(self) -> int:
         return sum(dup.wasted_space_bytes for dup in self.duplicate_images)
 
+    def count_by_category(self) -> dict[FindingCategory, int]:
+        """Count findings per CI gate category (duplicate images count as duplicates)."""
+        counts = dict.fromkeys(FindingCategory, 0)
+        for issue in self.issues:
+            counts[IssueType(issue.issue_type).category] += 1
+        counts[FindingCategory.DUPLICATES] += len(self.duplicate_images)
+        return counts
+
     def to_dict(self) -> dict[str, object]:
         return {
-            "xcassets_path": str(self.xcassets_path),
+            # `xcassets_path` (first catalog) is kept for pre-0.2 consumers.
+            "xcassets_path": str(self.xcassets_paths[0]) if self.xcassets_paths else "",
+            "xcassets_paths": [str(path) for path in self.xcassets_paths],
             "source_path": str(self.source_path),
             "total_assets": self.total_assets,
             "summary": {
                 "total_assets": self.total_assets,
                 "used_assets_count": self.used_assets_count,
+                "unused_assets_count": len(self.unused_assets),
+                "ignored_assets_count": len(self.ignored_assets),
                 "total_issues": len(self.issues),
                 "total_duplicate_images": len(self.duplicate_images),
                 "total_wasted_space_bytes": self.total_wasted_space_bytes,

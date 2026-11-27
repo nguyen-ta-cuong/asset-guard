@@ -4,9 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from asset_guard import scanner
+from asset_guard import duplicates
+from asset_guard.config import ScannerConfig
+from asset_guard.duplicates import compute_sha256
 from asset_guard.models import IssueType
-from asset_guard.scanner import AssetScanner, ScannerConfig, audit_assets, compute_sha256
+from asset_guard.scanner import AssetScanner, audit_assets
 
 
 def _create_imageset(
@@ -218,13 +220,13 @@ def test_find_duplicate_images_prefilters_by_size_and_sorts_by_waste(tmp_path, m
     missing_file = tmp_path / "missing.png"
 
     hashed_paths: list[Path] = []
-    real_compute = scanner.compute_sha256
+    real_compute = duplicates.compute_sha256
 
     def _spy_sha256(path: Path) -> str:
         hashed_paths.append(path)
         return real_compute(path)
 
-    monkeypatch.setattr(scanner, "compute_sha256", _spy_sha256)
+    monkeypatch.setattr(duplicates, "compute_sha256", _spy_sha256)
 
     groups = AssetScanner().find_duplicate_images(
         [
@@ -305,67 +307,6 @@ def test_namespace_resolution_and_duplicate_asset_name(tmp_path):
     assert any(issue.issue_type == IssueType.DUPLICATE_ASSET_NAME for issue in report.issues)
 
 
-def test_collect_used_references_swift_comments_symbols_ib_and_excludes(tmp_path):
-    sources = tmp_path / "Sources"
-    sources.mkdir()
-    (sources / "Main.swift").write_text(
-        """
-        import SwiftUI
-        import UIKit
-
-        // UIImage(named: "commented_line")
-        /* Image("commented_block") */
-        let a = UIImage(named: "uikit_icon", in: .main, compatibleWith: nil)
-        let b = Image("swiftui_banner")
-        let c = Image(decorative: "bg_pattern")
-        let d = #imageLiteral(resourceName: "literal_logo")
-        let e = Image(systemName: "star.fill")
-        let f = Image(.heroBanner)
-        let g = UIImage(resource: .appLogo)
-        let h = Image("https://not-a-comment")
-        """,
-        encoding="utf-8",
-    )
-    (sources / "Launch.storyboard").write_text(
-        '<imageView image="storyboard_hero" />',
-        encoding="utf-8",
-    )
-    (sources / "Card.xib").write_text(
-        '<state key="normal" image="xib_button" />',
-        encoding="utf-8",
-    )
-    pods_dir = sources / "Pods" / "Lib"
-    pods_dir.mkdir(parents=True)
-    (pods_dir / "Vendor.swift").write_text('Image("vendor_ignored")', encoding="utf-8")
-
-    asset_scanner = AssetScanner()
-    names, symbols = asset_scanner.collect_used_references(sources)
-
-    assert names == {
-        "uikit_icon",
-        "swiftui_banner",
-        "bg_pattern",
-        "literal_logo",
-        "https://not-a-comment",
-        "storyboard_hero",
-        "xib_button",
-    }
-    assert symbols == {"heroBanner", "appLogo"}
-    assert asset_scanner.collect_used_assets(sources) == names
-
-    swift_only = AssetScanner(ScannerConfig(scan_interface_builder=False))
-    swift_names = swift_only.collect_used_assets(sources)
-    assert "storyboard_hero" not in swift_names
-    assert "xib_button" not in swift_names
-
-
-def test_to_swift_symbol_conversions():
-    assert scanner._to_swift_symbol("hero_banner") == "heroBanner"  # noqa: SLF001
-    assert scanner._to_swift_symbol("app-logo") == "appLogo"  # noqa: SLF001
-    assert scanner._to_swift_symbol("MyIcon") == "myIcon"  # noqa: SLF001
-    assert scanner._to_swift_symbol("---") == ""  # noqa: SLF001
-
-
 def test_scan_raises_for_missing_directories(tmp_path):
     valid_dir = tmp_path / "Valid"
     valid_dir.mkdir()
@@ -406,10 +347,59 @@ def test_audit_assets_end_to_end(tmp_path):
 
     report = audit_assets(xcassets, sources)
 
-    assert report.xcassets_path == xcassets
+    assert report.xcassets_paths == [xcassets]
     assert report.source_path == sources
     assert report.total_assets == 2
     assert report.used_assets_count == 1
     assert report.unused_assets == ["unused_vector"]
     assert len(report.duplicate_images) == 1
     assert report.total_wasted_space_bytes == len(shared_bytes)
+
+
+def _bitmap_contents() -> dict[str, object]:
+    return {
+        "images": [
+            {"filename": "a@2x.png", "idiom": "universal", "scale": "2x"},
+            {"filename": "a@3x.png", "idiom": "universal", "scale": "3x"},
+        ]
+    }
+
+
+def _bitmap(name: str) -> dict[str, bytes]:
+    return {"a@2x.png": f"{name}-2x".encode(), "a@3x.png": f"{name}-3x".encode()}
+
+
+def test_scan_multiple_catalogs_and_ignore_patterns(tmp_path):
+    app_catalog = tmp_path / "App" / "Assets.xcassets"
+    widget_catalog = tmp_path / "Widget" / "Widget.xcassets"
+    for catalog_dir, name in [
+        (app_catalog, "app_logo"),
+        (app_catalog, "onboarding_1"),
+        (app_catalog, "legacy"),
+        (widget_catalog, "widget_bg"),
+        (widget_catalog, "app_logo"),
+    ]:
+        _create_imageset(
+            catalog_dir, name, _bitmap_contents(), files=_bitmap(f"{catalog_dir}{name}")
+        )
+    (tmp_path / "App" / "View.swift").write_text('Image("app_logo")\n', encoding="utf-8")
+    (tmp_path / "Widget" / "Widget.swift").write_text("Image(.widgetBg)\n", encoding="utf-8")
+
+    config = ScannerConfig(ignore_patterns=("onboarding_*",))
+    report = AssetScanner(config).scan([app_catalog, widget_catalog], tmp_path)
+
+    assert report.xcassets_paths == [app_catalog, widget_catalog]
+    assert report.total_assets == 5
+    assert report.used_assets_count == 3
+    assert report.unused_assets == ["legacy"]
+    assert report.ignored_assets == ["onboarding_1"]
+    # the same name in two different catalogs is not a duplicate-name issue
+    assert not any(i.issue_type == IssueType.DUPLICATE_ASSET_NAME for i in report.issues)
+
+
+def test_scan_raises_for_any_missing_catalog(tmp_path):
+    existing = tmp_path / "A.xcassets"
+    existing.mkdir()
+
+    with pytest.raises(FileNotFoundError, match="Asset catalog directory not found"):
+        AssetScanner().scan([existing, tmp_path / "Missing.xcassets"], tmp_path)
