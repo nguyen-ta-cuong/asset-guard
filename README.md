@@ -1,107 +1,98 @@
 # asset-guard
 
-A lightweight Python (3.12+) CLI tool to audit **unused** and **broken** image assets in Xcode projects (`.xcassets`), built with zero third-party runtime dependencies.
-
-> [!NOTE]
-> **Current status (`v0.1.0`):** The repository currently contains the project setup (`pyproject.toml`, `uv.lock`) and the initial CLI entry point (`src/asset_guard/__init__.py`). The `models.py`, `scanner.py`, `cli.py`, and `tests/test_scanner.py` modules below describe the planned implementation.
+A Python (3.12+) CLI that keeps Xcode asset catalogs (`.xcassets`) lean. It finds
+**unused**, **duplicate**, and **broken** image assets, and can **remove unused image sets
+before you build**. It is designed to run in GitHub Actions, Jenkins, or any other CI.
 
 ---
 
 ## Features
 
-- **Asset Catalog Scanning (`.xcassets`):** Discovers `.imageset` directories and parses each `Contents.json`.
-- **Broken Asset Detection:** Reports image sets whose `Contents.json` references a `filename` missing on disk or contains invalid JSON.
-- **Unused Asset Detection:** Scans Swift source files (`.swift`) for image references (e.g. `UIImage(named:)`, SwiftUI `Image(...)`) and flags assets that are never referenced.
-- **Zero Runtime Dependencies:** Relies solely on the Python Standard Library (`dataclasses`, `json`, `pathlib`, `re`, `argparse`).
+- **Unused assets:** finds image sets that nothing references. Detection is
+  conservative, so `clean` does not delete images that are in use. It checks:
+  - every string literal in Swift and Objective-C (`UIImage(named:)`, `Image("…")`,
+    enums, constants, SwiftGen, R.swift),
+  - dynamic names (`"icon_\(i)"`, `@"icon_%d"`),
+  - Xcode 15+ generated symbols (`Image(.logo)`, `UIImage.logo`, `ImageResource.logo`),
+  - storyboard/XIB attributes and plist strings.
+- **Remove unused assets:** `asset-guard clean` shows what it would delete; `--apply`
+  deletes whole `.imageset` folders. It refuses to run when the catalogs have
+  uncommitted git changes, so every deletion can be reverted.
+- **Duplicate images:** finds byte-identical files across image sets and reports the
+  wasted space. Duplicates are reported, never auto-deleted.
+- **Broken image sets:** invalid or missing `Contents.json`, missing files, missing
+  `@2x`/`@3x`, vectors with an explicit scale, and duplicate asset names.
+- **Built for CI:** `--fail-on unused,duplicates,broken`, `--report-json`,
+  `--summary-file` (GitHub step summary), meaningful exit codes, a GitHub Action, and a
+  Jenkins example. See **[docs/ci.md](docs/ci.md)**.
+- **Multiple catalogs:** discovers every `.xcassets` in the project (app, widgets,
+  local packages) and skips `Pods`, `.build`, `DerivedData`, and `Carthage`.
 
 ---
 
-## Requirements
-
-- **Python** `>= 3.12` (pinned in `.python-version`)
-- **[uv](https://docs.astral.sh/uv/)** for environment, dependency, and build management
-
----
-
-## Setup
-
-1. Clone the repository and enter the project directory:
-
-   ```bash
-   git clone https://github.com/nguyen-ta-cuong/asset-guard.git
-   cd asset-guard
-   ```
-
-2. Create the virtual environment (`.venv`) and install development dependencies (including `pytest`):
-
-   ```bash
-   uv sync
-   ```
-
-3. Verify the CLI entry point runs:
-
-   ```bash
-   uv run asset-guard
-   ```
-
----
-
-## Usage
-
-### Run the CLI
+## Quick start
 
 ```bash
-uv run asset-guard
+# Report only (never modifies files)
+uvx --from git+https://github.com/nguyen-ta-cuong/asset-guard asset-guard audit /path/to/MyApp
+
+# Dry run: list unused image sets that would be removed
+asset-guard clean /path/to/MyApp
+
+# Delete them (requires committed, clean catalogs, or pass --force)
+asset-guard clean /path/to/MyApp --apply
+
+# CI gate: exit 1 if unused or duplicate images exist, and save a JSON report
+asset-guard audit . --fail-on unused,duplicates --report-json asset-guard.json
 ```
 
-Planned CLI interface once `cli.py` is implemented with `argparse`:
+Try it on the bundled sample project: `uv run asset-guard audit examples/SampleApp`.
+
+### Configuration (optional)
+
+`.asset-guard.toml` in the project root:
+
+```toml
+ignore = ["seasonal_*"]        # asset-name globs that are never reported or removed
+exclude-dirs = ["Generated"]   # extra source dirs to skip
+expected-scales = ["2x", "3x"] # required bitmap scales
+scan-interface-builder = true
+```
+
+### CI
+
+```yaml
+# GitHub Actions
+- uses: nguyen-ta-cuong/asset-guard@main   # pin a tag/SHA
+  with:
+    command: clean
+    apply: "true"
+```
+
+See [docs/ci.md](docs/ci.md) for PR checks, release builds, the Jenkins pipeline, exit
+codes, and the git safety check.
+
+---
+
+## Development
+
+Requirements: **Python** `>= 3.12` and **[uv](https://docs.astral.sh/uv/)**.
 
 ```bash
-# Audit an Xcode project at the specified directory
-uv run asset-guard /path/to/MyXcodeProject
-
-# Display help and available options
+git clone https://github.com/nguyen-ta-cuong/asset-guard.git
+cd asset-guard
+make dev      # create .venv with pytest, ruff, ty
+make lint     # ruff format check + ruff check + ty
+make test     # pytest with coverage gate
 uv run asset-guard --help
 ```
 
-### Run Tests
-
-```bash
-uv run pytest
-```
-
----
-
-## Project Structure
-
-```text
-asset-guard/
-├── pyproject.toml              # Project metadata, scripts, build config & dependencies
-├── uv.lock                     # Locked dependency versions
-├── README.md                   # Setup and usage guide
-├── docs/
-│   └── swift-to-python.md      # Swift-to-Python learning notes & concept mapping
-├── src/
-│   └── asset_guard/
-│       ├── __init__.py         # Package initialization & CLI entry point (asset_guard:main)
-│       ├── models.py           # Data models (dataclass)
-│       ├── scanner.py          # Contents.json parsing, Swift scanning & audit logic
-│       └── cli.py              # Command-line interface (argparse)
-└── tests/
-    └── test_scanner.py         # Unit tests (pytest)
-```
-
-### Module Overview
-
-| Module | Responsibility |
-| --- | --- |
-| `asset_guard.models` | Defines typed data structures (`@dataclass`) representing image assets and audit results. |
-| `asset_guard.scanner` | Walks `.xcassets` catalogs, parses `Contents.json`, scans `.swift` files, and classifies unused/broken assets. |
-| `asset_guard.cli` | Parses CLI arguments (`argparse`), invokes the scanner, and formats audit output. |
-| `tests/test_scanner.py` | Unit tests verifying JSON parsing, Swift reference matching, and edge cases using `pytest`. |
+See [AGENTS.md](AGENTS.md) for the module layout, conventions, safety rules, and
+roadmap.
 
 ---
 
 ## Learning Notes
 
-Coming from Swift / iOS development? See [docs/swift-to-python.md](docs/swift-to-python.md) for a side-by-side knowledge map between Swift and Python concepts used in this project.
+Coming from Swift / iOS development? See [docs/swift-to-python.md](docs/swift-to-python.md)
+for a side-by-side map between the Swift and Python concepts used in this project.
