@@ -13,7 +13,6 @@ from rich.console import Console
 
 from asset_guard.catalog import discover_catalogs
 from asset_guard.cleaner import (
-    RemovalPlan,
     WorktreeState,
     apply_removal,
     plan_removal,
@@ -26,7 +25,7 @@ from asset_guard.config import (
     ScannerConfig,
     load_scanner_config,
 )
-from asset_guard.models import AuditReport, FindingCategory
+from asset_guard.models import AuditReport, FindingCategory, RemovalPlan
 from asset_guard.reporting import render_clean_report, render_markdown_summary, render_text_report
 from asset_guard.scanner import AssetScanner
 

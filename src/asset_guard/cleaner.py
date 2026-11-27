@@ -11,42 +11,10 @@ code would disappear at runtime. They are reported so CI can fail on them instea
 
 import shutil
 import subprocess
-from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from asset_guard.models import AuditReport, IssueType
-
-
-@dataclass(frozen=True)
-class RemovalCandidate:
-    asset_name: str
-    path: Path
-    size_bytes: int
-
-
-@dataclass(frozen=True)
-class RemovalPlan:
-    candidates: list[RemovalCandidate]
-
-    @property
-    def reclaimed_bytes(self) -> int:
-        return sum(candidate.size_bytes for candidate in self.candidates)
-
-    def to_dict(self, *, applied: bool) -> dict[str, object]:
-        return {
-            "applied": applied,
-            "count": len(self.candidates),
-            "reclaimed_bytes": self.reclaimed_bytes,
-            "imagesets": [
-                {
-                    "asset_name": candidate.asset_name,
-                    "path": str(candidate.path),
-                    "size_bytes": candidate.size_bytes,
-                }
-                for candidate in self.candidates
-            ],
-        }
+from asset_guard.models import AuditReport, IssueType, RemovalCandidate, RemovalPlan
 
 
 def _dir_size(path: Path) -> int:
