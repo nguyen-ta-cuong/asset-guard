@@ -1,0 +1,8 @@
+# asset-guard configuration (all keys optional)
+
+# Asset names (globs) that are never reported unused or removed —
+# e.g. assets loaded from a server-driven name or a feature flag.
+ignore = ["seasonal_*"]
+
+# Extra directories to skip, on top of .git .build .swiftpm DerivedData Pods Carthage.
+exclude-dirs = []

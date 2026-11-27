@@ -1,0 +1,122 @@
+name: "asset-guard"
+description: "Find unused and duplicate image assets in Xcode asset catalogs, and remove unused ones before building."
+author: "nguyen-ta-cuong"
+branding:
+  icon: "image"
+  color: "green"
+
+inputs:
+  command:
+    description: "`audit` (report only) or `clean` (remove unused image sets; dry run unless `apply` is true)."
+    required: false
+    default: "audit"
+  path:
+    description: "Xcode project root directory."
+    required: false
+    default: "."
+  apply:
+    description: "For `clean`: actually delete unused image sets."
+    required: false
+    default: "false"
+  force:
+    description: "For `clean`: skip the git safety check (catalogs must otherwise have no uncommitted changes)."
+    required: false
+    default: "false"
+  fail-on:
+    description: "Comma-separated finding categories that fail the step: unused, duplicates, broken, any."
+    required: false
+    default: ""
+  config:
+    description: "Path to .asset-guard.toml (default: <path>/.asset-guard.toml if present)."
+    required: false
+    default: ""
+  report-json:
+    description: "Where to write the JSON report (upload it with actions/upload-artifact)."
+    required: false
+    default: "asset-guard-report.json"
+  args:
+    description: "Extra arguments for asset-guard, space-separated (e.g. `--ignore promo_* --verbose`)."
+    required: false
+    default: ""
+
+outputs:
+  report-json:
+    description: "Path of the JSON report."
+    value: ${{ steps.run.outputs.report-json }}
+  exit-code:
+    description: "asset-guard exit code (0 ok, 1 --fail-on matched, 2 usage error, 3 runtime error)."
+    value: ${{ steps.run.outputs.exit-code }}
+  unused-count:
+    description: "Unused assets remaining in the final report."
+    value: ${{ steps.run.outputs.unused-count }}
+  duplicate-count:
+    description: "Duplicate findings (identical images + duplicate names)."
+    value: ${{ steps.run.outputs.duplicate-count }}
+  removed-count:
+    description: "Image sets removed (or that would be removed in a dry run) by `clean`."
+    value: ${{ steps.run.outputs.removed-count }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up uv
+      uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+      with:
+        enable-cache: "false"
+
+    - name: Run asset-guard
+      id: run
+      shell: bash
+      env:
+        AG_ACTION_PATH: ${{ github.action_path }}
+        AG_COMMAND: ${{ inputs.command }}
+        AG_PATH: ${{ inputs.path }}
+        AG_APPLY: ${{ inputs.apply }}
+        AG_FORCE: ${{ inputs.force }}
+        AG_FAIL_ON: ${{ inputs.fail-on }}
+        AG_CONFIG: ${{ inputs.config }}
+        AG_REPORT_JSON: ${{ inputs.report-json }}
+        AG_ARGS: ${{ inputs.args }}
+        NO_COLOR: "1"
+      run: |
+        set -euo pipefail
+
+        case "$AG_COMMAND" in
+          audit|clean) ;;
+          *) echo "::error title=asset-guard::command must be 'audit' or 'clean', got '$AG_COMMAND'"; exit 2 ;;
+        esac
+
+        args=("$AG_COMMAND" "$AG_PATH" --report-json "$AG_REPORT_JSON")
+        if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then args+=(--summary-file "$GITHUB_STEP_SUMMARY"); fi
+        if [[ "$AG_COMMAND" == "clean" && "$AG_APPLY" == "true" ]]; then args+=(--apply); fi
+        if [[ "$AG_COMMAND" == "clean" && "$AG_FORCE" == "true" ]]; then args+=(--force); fi
+        if [[ -n "$AG_FAIL_ON" ]]; then args+=(--fail-on "$AG_FAIL_ON"); fi
+        if [[ -n "$AG_CONFIG" ]]; then args+=(--config "$AG_CONFIG"); fi
+        if [[ -n "$AG_ARGS" ]]; then
+          read -ra extra <<< "$AG_ARGS"
+          args+=("${extra[@]}")
+        fi
+
+        set +e
+        uvx --from "$AG_ACTION_PATH" asset-guard "${args[@]}"
+        status=$?
+        set -e
+
+        {
+          echo "report-json=$AG_REPORT_JSON"
+          echo "exit-code=$status"
+        } >> "$GITHUB_OUTPUT"
+
+        if [[ -f "$AG_REPORT_JSON" ]]; then
+          python3 - "$AG_REPORT_JSON" >> "$GITHUB_OUTPUT" <<'PY'
+        import json, sys
+        report = json.load(open(sys.argv[1], encoding="utf-8"))
+        summary = report["summary"]
+        duplicate_names = sum(1 for i in report["issues"] if i["issue_type"] == "duplicate_asset_name")
+        print(f"unused-count={summary['unused_assets_count']}")
+        print(f"duplicate-count={summary['total_duplicate_images'] + duplicate_names}")
+        print(f"removed-count={report.get('clean', {}).get('count', 0)}")
+        PY
+        fi
+
+        exit "$status"
