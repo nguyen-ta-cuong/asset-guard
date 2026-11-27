@@ -59,7 +59,6 @@ action.yml          # composite GitHub Action (setup-uv + uvx --from action path
 .github/workflows/ci.yml   # lint/test + action smoke test against examples/SampleApp
 examples/SampleApp/        # tiny fake Xcode project covering every reference style
 docs/ci.md                 # user docs: GitHub Actions, Jenkins, exit codes, safety check
-docs/swift-to-python.md    # learning notes for the Swift-background maintainer
 ```
 
 ```text
@@ -187,5 +186,5 @@ bug, while an extra match (false "used") is acceptable. Every fix needs a test i
 ## Git
 
 Work on feature branches. `main` is the PR base. Use conventional commits
-(`feat(cli): …`, `fix(references): …`, `docs: …`). Never commit `.venv`, caches, or
-`.coverage`.
+(`feat(cli): …`, `fix(references): …`, `docs: …`). Never commit `.venv`, caches,
+`.coverage`, or `docs/private/`.

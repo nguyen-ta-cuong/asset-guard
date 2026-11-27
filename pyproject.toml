@@ -3,6 +3,8 @@ name = "asset-guard"
 version = "0.1.0"
 description = "CLI to find and remove unused and duplicate image assets in Xcode projects, built for CI"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "cuong", email = "nguyentacuong90@gmail.com" }
 ]

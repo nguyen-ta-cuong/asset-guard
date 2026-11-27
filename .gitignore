@@ -16,3 +16,6 @@ wheels/
 coverage.xml
 htmlcov/
 
+# Private local notes
+docs/private/
+

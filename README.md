@@ -87,12 +87,22 @@ make test     # pytest with coverage gate
 uv run asset-guard --help
 ```
 
-See [AGENTS.md](AGENTS.md) for the module layout, conventions, safety rules, and
-roadmap.
+See [AGENTS.md](AGENTS.md) for the module layout, conventions, and safety rules.
 
 ---
 
-## Learning Notes
+## Roadmap
 
-Coming from Swift / iOS development? See [docs/swift-to-python.md](docs/swift-to-python.md)
-for a side-by-side map between the Swift and Python concepts used in this project.
+1. **Release `v0.2.0`** — Tag the subcommand-based CLI (`audit` / `clean`) so CI workflows
+   can pin `asset-guard@v0.2.0` (and optionally publish to PyPI).
+2. **Asset-level duplicate grouping & local-only `dedupe`** — Group duplicates where all
+   scales of set A match set B, with an opt-in local command that safely rewrites references.
+3. **Richer CI report formats** — SARIF (for GitHub Code Scanning annotations on PRs) and
+   JUnit XML (for Jenkins test reports), wired through `reporting.py` and `_write_outputs`.
+4. **Broader catalog coverage** — Extend `catalog.py` to `.colorset` and `.symbolset`.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).
