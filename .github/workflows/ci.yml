@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Lint & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+      - run: uv sync --all-groups --locked
+      - run: make lint
+      - run: make test
+
+  action-smoke:
+    name: GitHub Action smoke test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Audit fails on duplicates
+        id: audit
+        uses: ./
+        continue-on-error: true
+        with:
+          path: examples/SampleApp
+          fail-on: duplicates
+          report-json: out/audit.json
+
+      - name: Clean removes unused image sets
+        id: clean
+        uses: ./
+        with:
+          command: clean
+          path: examples/SampleApp
+          apply: "true"
+          report-json: out/clean.json
+
+      - name: Verify results
+        shell: bash
+        env:
+          AUDIT_OUTCOME: ${{ steps.audit.outcome }}
+          REMOVED: ${{ steps.clean.outputs.removed-count }}
+          UNUSED_AFTER: ${{ steps.clean.outputs.unused-count }}
+          DUPLICATES: ${{ steps.clean.outputs.duplicate-count }}
+        run: |
+          set -euo pipefail
+          catalog=examples/SampleApp/SampleApp/Assets.xcassets
+          test "$AUDIT_OUTCOME" = "failure"
+          python3 -c 'import json,sys; assert json.load(open("out/audit.json"))["summary"]["total_duplicate_images"] == 1'
+          test "$REMOVED" = "1"
+          test "$UNUSED_AFTER" = "0"
+          test "$DUPLICATES" = "1"
+          test ! -e "$catalog/unused_promo.imageset"
+          for kept in app_logo hero_banner hero_banner_copy onboarding_1 onboarding_2 objc_badge tab_home seasonal_xmas; do
+            test -d "$catalog/$kept.imageset"
+          done
+          echo "Smoke test passed"

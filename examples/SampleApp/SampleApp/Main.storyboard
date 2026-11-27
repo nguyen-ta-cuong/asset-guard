@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0">
+    <scenes>
+        <scene sceneID="s1">
+            <objects>
+                <tabBarItem key="tabBarItem" title="Home" selectedImage="tab_home"/>
+            </objects>
+        </scene>
+    </scenes>
+    <resources>
+        <image name="tab_home" width="24" height="24"/>
+    </resources>
+</document>
