@@ -1,0 +1,71 @@
+from dataclasses import dataclass, field
+from pathlib import Path
+
+
+@dataclass(frozen=True)
+class AssetIssue:
+    asset_name: str
+    issue_type: str
+    detail: str
+    path: Path
+
+
+@dataclass(frozen=True)
+class DuplicateImage:
+    sha256: str
+    file_size_bytes: int
+    files: list[Path]
+
+    @property
+    def wasted_space_bytes(self) -> int:
+        return self.file_size_bytes * max(0, len(self.files) - 1)
+
+
+@dataclass
+class AuditReport:
+    xassets_path: Path
+    source_path: Path
+    total_assets: int
+    used_assets_count: int
+    issues: list[AssetIssue] = field(default_factory=list)
+    duplicate_images: list[DuplicateImage] = field(default_factory=list)
+
+    @property
+    def unused_assets(self) -> list[str]:
+        return [issue.asset_name for issue in self.issues if issue.issue_type == "unused"]
+
+    @property
+    def total_wasted_space_bytes(self) -> int:
+        return sum(dup.wasted_space_bytes for dup in self.duplicate_images)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "xassets_path": str(self.xassets_path),
+            "source_path": str(self.source_path),
+            "total_assets": self.total_assets,
+            "summary": {
+                "total_assets": self.total_assets,
+                "used_assets_count": self.used_assets_count,
+                "total_issues": len(self.issues),
+                "total_duplicate_images": len(self.duplicate_images),
+                "total_wasted_space_bytes": self.total_wasted_space_bytes,
+            },
+            "issues": [
+                {
+                    "asset_name": issue.asset_name,
+                    "issue_type": issue.issue_type,
+                    "detail": issue.detail,
+                    "path": str(issue.path),
+                }
+                for issue in self.issues
+            ],
+            "duplicate_images": [
+                {
+                    "sha256": dup.sha256,
+                    "file_size_bytes": dup.file_size_bytes,
+                    "files": [str(file) for file in dup.files],
+                    "wasted_space_bytes": dup.wasted_space_bytes,
+                }
+                for dup in self.duplicate_images
+            ],
+        }
