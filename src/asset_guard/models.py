@@ -109,3 +109,38 @@ class AuditReport:
                 for dup in self.duplicate_images
             ],
         }
+
+
+@dataclass(frozen=True)
+class RemovalCandidate:
+    """An unused `.imageset` directory that `clean` will delete."""
+
+    asset_name: str
+    path: Path
+    size_bytes: int
+
+
+@dataclass(frozen=True)
+class RemovalPlan:
+    """Everything `clean` will delete, in deterministic order."""
+
+    candidates: list[RemovalCandidate]
+
+    @property
+    def reclaimed_bytes(self) -> int:
+        return sum(candidate.size_bytes for candidate in self.candidates)
+
+    def to_dict(self, *, applied: bool) -> dict[str, object]:
+        return {
+            "applied": applied,
+            "count": len(self.candidates),
+            "reclaimed_bytes": self.reclaimed_bytes,
+            "imagesets": [
+                {
+                    "asset_name": candidate.asset_name,
+                    "path": str(candidate.path),
+                    "size_bytes": candidate.size_bytes,
+                }
+                for candidate in self.candidates
+            ],
+        }

@@ -6,14 +6,12 @@ import pytest
 
 from asset_guard import cleaner
 from asset_guard.cleaner import (
-    RemovalCandidate,
-    RemovalPlan,
     WorktreeState,
     apply_removal,
     plan_removal,
     worktree_state,
 )
-from asset_guard.models import AssetIssue, AuditReport, IssueType
+from asset_guard.models import AssetIssue, AuditReport, IssueType, RemovalCandidate, RemovalPlan
 
 
 def _imageset(catalog: Path, name: str, payload: bytes = b"12345") -> Path:

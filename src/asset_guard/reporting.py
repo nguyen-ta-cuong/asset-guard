@@ -6,8 +6,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from asset_guard.cleaner import RemovalPlan
-from asset_guard.models import AuditReport, FindingCategory
+from asset_guard.models import AuditReport, FindingCategory, RemovalPlan
 
 BYTES_PER_UNIT = 1024
 SHORT_SHA_LENGTH = 12

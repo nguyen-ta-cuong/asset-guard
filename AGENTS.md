@@ -46,12 +46,13 @@ Before you call a change done, run `make lint && make test`. Both must pass.
 src/asset_guard/
 ├── cli.py          # Typer app (audit, clean): path/config resolution, git safety, outputs, exit codes
 ├── config.py       # ScannerConfig, defaults, .asset-guard.toml loading (tomllib), ignore globs
-├── models.py       # Pure dataclasses: IssueType, FindingCategory, AssetIssue, DuplicateImage, AuditReport
+├── models.py       # All data models: IssueType, FindingCategory, AssetIssue, DuplicateImage, AuditReport,
+│                   #   RemovalCandidate, RemovalPlan (pure, no I/O)
 ├── catalog.py      # .xcassets side: discover catalogs, find .imageset dirs, resolve names, validate
 ├── references.py   # Source side: Swift/ObjC strings, dynamic patterns, Swift symbols, IB attributes, plists
 ├── duplicates.py   # Size pre-filter + SHA-256 grouping of identical files
 ├── scanner.py      # AssetScanner orchestrator: catalogs + references + duplicates -> AuditReport
-├── cleaner.py      # RemovalPlan (pure), apply_removal (the ONLY place that deletes), git worktree check
+├── cleaner.py      # plan_removal (pure), apply_removal (the ONLY place that deletes), git worktree check
 └── reporting.py    # Rich text (audit/clean) and Markdown summary rendering
 tests/              # one test module per source module (tmp_path fixtures, no real Xcode projects)
 action.yml          # composite GitHub Action (setup-uv + uvx --from action path)
@@ -112,8 +113,12 @@ bug, while an extra match (false "used") is acceptable. Every fix needs a test i
   scope it to one rule code and give a reason.
 - Annotate every public function. Use builtin generics (`list[str]`, `X | None`).
   Make helper parameters keyword-only (`*,`).
-- Models are `@dataclass(frozen=True)` value objects with no I/O (`AuditReport` is
-  mutable only for test convenience).
+- **All shared data models live in `models.py`** (report, issues, duplicates, removal
+  plan). They are `@dataclass(frozen=True)` value objects with no I/O (`AuditReport`
+  is mutable only for test convenience). Modules hold behavior; `models.py` holds data.
+  Exceptions: module-private helpers (`catalog.ParsedImageset`,
+  `references.References`, `cleaner.WorktreeState`) and configuration
+  (`config.ScannerConfig`).
 - **The JSON shape is a public contract** that CI scripts and `action.yml` parse:
   `summary.*`, `issues[]`, `duplicate_images[]`, `clean.{applied,count,reclaimed_bytes,imagesets}`.
   Only add keys. Renaming or removing one needs a version bump and an update to

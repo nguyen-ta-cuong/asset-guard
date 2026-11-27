@@ -1,8 +1,14 @@
 from pathlib import Path
 
 from asset_guard import reporting
-from asset_guard.cleaner import RemovalCandidate, RemovalPlan
-from asset_guard.models import AssetIssue, AuditReport, DuplicateImage, IssueType
+from asset_guard.models import (
+    AssetIssue,
+    AuditReport,
+    DuplicateImage,
+    IssueType,
+    RemovalCandidate,
+    RemovalPlan,
+)
 from asset_guard.reporting import display_path, render_markdown_summary
 
 
