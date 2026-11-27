@@ -1,2 +1,3 @@
-def main() -> None:
-    print("Hello from asset-guard!")
+from asset_guard.cli import app, main
+
+__all__ = ["app", "main"]
