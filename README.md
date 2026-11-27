@@ -24,7 +24,7 @@ before you build**. It is designed to run in GitHub Actions, Jenkins, or any oth
   `@2x`/`@3x`, vectors with an explicit scale, and duplicate asset names.
 - **Built for CI:** `--fail-on unused,duplicates,broken`, `--report-json`,
   `--summary-file` (GitHub step summary), meaningful exit codes, a GitHub Action, and a
-  Jenkins example. See **[docs/ci.md](docs/ci.md)**.
+  Jenkins example. See **[docs/ci.md](https://github.com/nguyen-ta-cuong/asset-guard/blob/main/docs/ci.md)**.
 - **Multiple catalogs:** discovers every `.xcassets` in the project (app, widgets,
   local packages) and skips `Pods`, `.build`, `DerivedData`, and `Carthage`.
 
@@ -33,8 +33,11 @@ before you build**. It is designed to run in GitHub Actions, Jenkins, or any oth
 ## Quick start
 
 ```bash
-# Report only (never modifies files)
-uvx --from git+https://github.com/nguyen-ta-cuong/asset-guard asset-guard audit /path/to/MyApp
+# Run directly without installing (requires uv)
+uvx asset-guard audit /path/to/MyApp
+
+# Or install globally
+uv tool install asset-guard   # or: pip install asset-guard
 
 # Dry run: list unused image sets that would be removed
 asset-guard clean /path/to/MyApp
@@ -63,13 +66,13 @@ scan-interface-builder = true
 
 ```yaml
 # GitHub Actions
-- uses: nguyen-ta-cuong/asset-guard@main   # pin a tag/SHA
+- uses: nguyen-ta-cuong/asset-guard@v0.1.0
   with:
     command: clean
     apply: "true"
 ```
 
-See [docs/ci.md](docs/ci.md) for PR checks, release builds, the Jenkins pipeline, exit
+See [docs/ci.md](https://github.com/nguyen-ta-cuong/asset-guard/blob/main/docs/ci.md) for PR checks, release builds, the Jenkins pipeline, exit
 codes, and the git safety check.
 
 ---
@@ -87,22 +90,20 @@ make test     # pytest with coverage gate
 uv run asset-guard --help
 ```
 
-See [AGENTS.md](AGENTS.md) for the module layout, conventions, and safety rules.
+See [AGENTS.md](https://github.com/nguyen-ta-cuong/asset-guard/blob/main/AGENTS.md) for the module layout, conventions, and safety rules.
 
 ---
 
 ## Roadmap
 
-1. **Release `v0.2.0`** — Tag the subcommand-based CLI (`audit` / `clean`) so CI workflows
-   can pin `asset-guard@v0.2.0` (and optionally publish to PyPI).
-2. **Asset-level duplicate grouping & local-only `dedupe`** — Group duplicates where all
+1. **Asset-level duplicate grouping & local-only `dedupe`** — Group duplicates where all
    scales of set A match set B, with an opt-in local command that safely rewrites references.
-3. **Richer CI report formats** — SARIF (for GitHub Code Scanning annotations on PRs) and
+2. **Richer CI report formats** — SARIF (for GitHub Code Scanning annotations on PRs) and
    JUnit XML (for Jenkins test reports), wired through `reporting.py` and `_write_outputs`.
-4. **Broader catalog coverage** — Extend `catalog.py` to `.colorset` and `.symbolset`.
+3. **Broader catalog coverage** — Extend `catalog.py` to `.colorset` and `.symbolset`.
 
 ---
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](https://github.com/nguyen-ta-cuong/asset-guard/blob/main/LICENSE).

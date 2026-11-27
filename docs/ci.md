@@ -94,7 +94,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: nguyen-ta-cuong/asset-guard@main # pin a release tag or commit SHA
+      - uses: nguyen-ta-cuong/asset-guard@v0.1.0 # pin a release tag or commit SHA
         with:
           command: audit
           fail-on: unused,duplicates
@@ -116,7 +116,7 @@ jobs:
 
       - name: Remove unused image assets
         id: assets
-        uses: nguyen-ta-cuong/asset-guard@main
+        uses: nguyen-ta-cuong/asset-guard@v0.1.0
         with:
           command: clean
           apply: "true"
@@ -158,8 +158,8 @@ pipeline {
     agent { label 'macos' }
 
     environment {
-        // Pin a release tag or commit SHA instead of main.
-        ASSET_GUARD = 'git+https://github.com/nguyen-ta-cuong/asset-guard@main'
+        // Pin a specific PyPI version for reproducible builds.
+        ASSET_GUARD = 'asset-guard==0.1.0'
         NO_COLOR = '1'
     }
 
@@ -174,7 +174,7 @@ pipeline {
             steps {
                 script {
                     def rc = sh(returnStatus: true, script: '''
-                        uvx --from "$ASSET_GUARD" asset-guard clean . --apply \
+                        uvx "$ASSET_GUARD" clean . --apply \
                             --fail-on duplicates,broken \
                             --report-json reports/asset-guard.json \
                             --summary-file reports/asset-guard.md
@@ -211,9 +211,8 @@ build.
 The same two commands work anywhere `uv` (or Python ≥ 3.12 with `pipx`) is available:
 
 ```bash
-uvx --from git+https://github.com/nguyen-ta-cuong/asset-guard@main \
-  asset-guard clean . --apply --report-json asset-guard.json
+uvx asset-guard==0.1.0 clean . --apply --report-json asset-guard.json
 ```
 
-fastlane: `sh("cd .. && uvx --from ... asset-guard clean . --apply")` in a lane, before
+fastlane: `sh("cd .. && uvx asset-guard==0.1.0 clean . --apply")` in a lane, before
 `build_app`.
