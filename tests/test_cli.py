@@ -1,4 +1,5 @@
 import json
+import re
 from importlib.metadata import PackageNotFoundError
 from pathlib import Path
 
@@ -11,6 +12,16 @@ from asset_guard.models import AssetIssue, AuditReport, DuplicateImage, IssueTyp
 from asset_guard.reporting import format_bytes
 
 runner = CliRunner()
+
+# Typer forces colored help when GITHUB_ACTIONS/FORCE_COLOR/PY_COLORS is set, which splits
+# option names like `--apply` across ANSI style codes. Strip them before asserting.
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _help_text(*args: str) -> str:
+    result = runner.invoke(cli.app, [*args, "--help"])
+    assert result.exit_code == 0
+    return _ANSI_ESCAPE.sub("", result.stdout)
 
 
 @pytest.fixture
@@ -53,20 +64,18 @@ def _stub_scan(monkeypatch, report: AuditReport) -> None:
 
 
 def test_root_help_lists_commands():
-    result = runner.invoke(cli.app, ["--help"])
+    help_text = _help_text()
 
-    assert result.exit_code == 0
-    assert "audit" in result.stdout
-    assert "clean" in result.stdout
-    assert "--version" in result.stdout
-    assert "--install-completion" in result.stdout
+    assert "audit" in help_text
+    assert "clean" in help_text
+    assert "--version" in help_text
+    assert "--install-completion" in help_text
 
 
 @pytest.mark.parametrize("command", ["audit", "clean"])
 def test_command_help_lists_ci_options(command):
-    result = runner.invoke(cli.app, [command, "--help"])
+    help_text = _help_text(command)
 
-    assert result.exit_code == 0
     for option in [
         "--xcassets",
         "--source",
@@ -78,14 +87,14 @@ def test_command_help_lists_ci_options(command):
         "--report-json",
         "--summary-file",
     ]:
-        assert option in result.stdout, option
+        assert option in help_text, option
 
 
 def test_clean_help_lists_apply_and_force():
-    result = runner.invoke(cli.app, ["clean", "--help"])
+    help_text = _help_text("clean")
 
-    assert "--apply" in result.stdout
-    assert "--force" in result.stdout
+    assert "--apply" in help_text
+    assert "--force" in help_text
 
 
 def test_version_flag_outputs_version():
@@ -544,6 +553,21 @@ def test_should_disable_color_respects_flags_env_and_tty(monkeypatch):
 
     monkeypatch.setenv("NO_COLOR", "1")
     assert cli._should_disable_color(no_color_flag=False, stream_is_tty=True)  # noqa: SLF001
+
+
+@pytest.mark.parametrize("env", [{"FORCE_COLOR": "1"}, {"FORCE_COLOR": "1", "NO_COLOR": "1"}])
+def test_plain_output_has_no_ansi_even_when_color_is_forced(xcode_project, monkeypatch, env):
+    project_root, xcassets, _ = xcode_project
+    _stub_scan(monkeypatch, _fake_report(xcassets, project_root))
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    args = ["audit", str(project_root)] + ([] if "NO_COLOR" in env else ["--no-color"])
+
+    result = runner.invoke(cli.app, args)
+
+    assert result.exit_code == 0
+    assert "\x1b[" not in result.stdout
+    assert "Asset Guard Audit Summary" in result.stdout
 
 
 def test_console_width_is_wide_in_ci(monkeypatch):

@@ -81,23 +81,25 @@ def _console_width(stream_is_tty: bool) -> int | None:
     return CI_CONSOLE_WIDTH
 
 
-def _make_stdout_console(*, no_color: bool) -> Console:
-    is_tty = sys.stdout.isatty()
+def _make_console(*, stderr: bool, no_color: bool) -> Console:
+    is_tty = (sys.stderr if stderr else sys.stdout).isatty()
+    plain = _should_disable_color(no_color_flag=no_color, stream_is_tty=is_tty)
     return Console(
-        no_color=_should_disable_color(no_color_flag=no_color, stream_is_tty=is_tty),
+        stderr=stderr,
+        # Rich's `no_color` still emits bold/italic codes when FORCE_COLOR forces a
+        # terminal; disabling the color system drops every ANSI escape.
+        color_system=None if plain else "auto",
         highlight=False,
         width=_console_width(is_tty),
     )
+
+
+def _make_stdout_console(*, no_color: bool) -> Console:
+    return _make_console(stderr=False, no_color=no_color)
 
 
 def _make_stderr_console(*, no_color: bool) -> Console:
-    is_tty = sys.stderr.isatty()
-    return Console(
-        stderr=True,
-        no_color=_should_disable_color(no_color_flag=no_color, stream_is_tty=is_tty),
-        highlight=False,
-        width=_console_width(is_tty),
-    )
+    return _make_console(stderr=True, no_color=no_color)
 
 
 def _print_error(err_console: Console, message: str, solutions: list[str]) -> None:
