@@ -104,6 +104,25 @@ def test_nested_namespace_symbols_keep_the_asset(sources, code):
     assert not refs.uses("onboarding/other")
 
 
+@pytest.mark.parametrize(
+    ("code", "symbols"),
+    [
+        ("let a = flag ? .logoA : .logoB", {"logoA", "logoB"}),
+        ("let a = cache[key] ?? .placeholder", {"placeholder"}),
+        ("let a = flag ? .Onboarding.hero : .Onboarding.welcome", {"hero", "welcome"}),
+        ("let a: ImageResource = flag\n    ? .logoA\n    : .logoB", {"logoA", "logoB"}),
+        ("let a = Image . spaced", {"spaced"}),
+        ("let a = images.map { $0.Image.logo }", {"logo"}),
+        ("make()\n    .modifier\n    .trailing", {"modifier", "trailing"}),
+        ("let a = [.first, .second]", {"first", "second"}),
+    ],
+)
+def test_implicit_members_after_operators_and_line_breaks(sources, code, symbols):
+    _write(sources, "View.swift", code)
+
+    assert symbols <= collect_used_references(sources).symbols
+
+
 def test_deeply_nested_namespace_symbol(sources):
     _write(sources, "View.swift", "Image(.OnboardingFlow.StepOne.bigHero)")
 

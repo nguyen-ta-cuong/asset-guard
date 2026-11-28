@@ -53,14 +53,15 @@ _MIN_PATTERN_LITERAL_CHARS = 2
 # Which of its members count as symbols is decided in `_chain_symbols`.
 _IDENTIFIER = r"[A-Za-z_]\w*"
 _MEMBER_CHAIN = re.compile(
-    rf"(?:(?<!\w)(?P<head>{_IDENTIFIER}))?(?P<members>(?:\s*\.\s*{_IDENTIFIER})+)"
+    rf"(?:(?<!\w)(?P<head>{_IDENTIFIER})\s*)?"
+    rf"(?P<members>\.\s*{_IDENTIFIER}(?:\s*\.\s*{_IDENTIFIER})*)"
 )
-_MEMBER_NAME = re.compile(_IDENTIFIER)
+_MEMBER = re.compile(rf"\.\s*({_IDENTIFIER})")
 _CALL_FOLLOWS = re.compile(r"\s*\(")
-# A chain without a head that follows one of these is a member of an expression
-# (`foo().logo`, `items[0].logo`, `view?.logo`), not an implicit member. The same holds
-# after a word character (`pair.0.logo`).
-_EXPRESSION_END = frozenset(")]?!")
+# A dot written directly after one of these (or after a word character) reads a member
+# of a value: `foo().logo`, `items[0].logo`, `view?.logo`, `view.logo`. After anything
+# else, whitespace included, it starts an implicit member: `(.logo`, `? .logo`, `?? .logo`.
+_VALUE_END = frozenset(")]?!")
 
 _IB_ATTRIBUTE_VALUE = re.compile(r'=\s*"([^"]+)"')
 _PLIST_STRING = re.compile(r"<string>([^<]+)</string>")
@@ -164,27 +165,24 @@ def _block_lines(content: str) -> list[str]:
 def _chain_symbols(code: str) -> set[str]:
     """Return every member that may be a generated asset symbol.
 
-    Implicit chains (`.logo`, `.Onboarding.hero`) give all their members. Chains with a
-    head give the members after the first capitalised name, so `ImageResource.logo`,
-    `ImageResource.Onboarding.hero` and `Asset.hero` count while `view.icon` does not.
-    A member that is called (`.padding()`) is a method, never an asset.
+    A member counts when it starts an implicit member expression (`.logo`), or when it
+    comes after a member that counts or after a capitalised name. So `.Onboarding.hero`,
+    `ImageResource.Onboarding.hero` and `Asset.hero` give `hero`, while `view.icon` gives
+    nothing. A member that is called (`.padding()`) is a method, never an asset.
     """
     symbols: set[str] = set()
-    for match in _MEMBER_CHAIN.finditer(code):
-        head = match.group("head")
-        members = _MEMBER_NAME.findall(match.group("members"))
-        if _CALL_FOLLOWS.match(code, match.end()):
-            members.pop()
-        if head is None:
-            before = code[match.start() - 1] if match.start() else ""
-            if before in _EXPRESSION_END or before.isalnum() or before == "_":
-                continue
-            symbols.update(members)
-            continue
-        chain = [head, *members]
-        first_type = next((i for i, name in enumerate(chain) if name[0].isupper()), None)
-        if first_type is not None:
-            symbols.update(chain[first_type + 1 :])
+    for chain in _MEMBER_CHAIN.finditer(code):
+        head = chain.group("head")
+        counts = head is not None and head[0].isupper()
+        called_at = chain.end() if _CALL_FOLLOWS.match(code, chain.end()) else -1
+        for member in _MEMBER.finditer(code, chain.start("members"), chain.end()):
+            name = member.group(1)
+            before = code[member.start() - 1] if member.start() else ""
+            implicit = not (before in _VALUE_END or before.isalnum() or before == "_")
+            if (counts or implicit) and member.end() != called_at:
+                symbols.add(name)
+                counts = True
+            counts = counts or name[0].isupper()
     return symbols
 
 
