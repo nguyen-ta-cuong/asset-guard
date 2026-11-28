@@ -14,6 +14,8 @@ before you build**. It is designed to run in GitHub Actions, Jenkins, or any oth
     enums, constants, SwiftGen, R.swift),
   - dynamic names (`"icon_\(i)"`, `@"icon_%d"`),
   - Xcode 15+ generated symbols (`Image(.logo)`, `UIImage.logo`, `ImageResource.logo`),
+  - folders with **Provides Namespace** ticked: the asset is named `onboarding/hero`, and
+    both `Image("onboarding/hero")` and the nested symbol `Image(.Onboarding.hero)` count,
   - storyboard/XIB attributes and plist strings.
 - **Remove unused assets:** `asset-guard clean` shows what it would delete; `--apply`
   deletes whole `.imageset` folders. It refuses to run when the catalogs have
@@ -57,6 +59,7 @@ Try it on the bundled sample project: `uv run asset-guard audit examples/SampleA
 
 ```toml
 ignore = ["seasonal_*"]        # asset-name globs that are never reported or removed
+                               # (namespaced assets need the folder: "onboarding/*")
 exclude-dirs = ["Generated"]   # extra source dirs to skip
 expected-scales = ["2x", "3x"] # required bitmap scales
 scan-interface-builder = true

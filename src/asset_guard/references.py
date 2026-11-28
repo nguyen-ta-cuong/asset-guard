@@ -8,7 +8,10 @@ unused. An asset counts as used when:
 - its name matches an interpolated / format string such as `"icon_\\(i)"` or
   `@"icon_%d"` (dynamic names);
 - one of its possible Xcode-generated Swift symbols appears as `.symbol` or
-  `ImageResource.symbol` / `UIImage.symbol` / `Image.symbol`;
+  `ImageResource.symbol` / `UIImage.symbol` / `Image.symbol`, also nested under a
+  namespace (`.Onboarding.hero`) or behind any capitalised type (`Asset.hero`);
+- it lives in a `provides-namespace` folder and its bare name (`hero` for
+  `onboarding/hero`) appears as a string, since the prefix may be concatenated;
 - its name equals any attribute value in a storyboard / XIB, or any `<string>` in a plist.
 
 False "used" results only mean an asset is kept. False "unused" results break apps.
@@ -46,11 +49,18 @@ _FORMAT_SPECIFIER = re.compile(
 )
 _MIN_PATTERN_LITERAL_CHARS = 2
 
-# `.logo` used as an implicit member (not `foo.logo`), and not a method call `.logo(`.
-_IMPLICIT_MEMBER = re.compile(r"(?<![\w)\]?!])\.([A-Za-z_]\w*)\b(?!\s*\()")
-_EXPLICIT_RESOURCE = re.compile(
-    r"\b(?:ImageResource|UIImage|NSImage|Image)\s*\.\s*([A-Za-z_]\w*)\b(?!\s*\()"
+# A member chain: `.logo`, `.Onboarding.hero`, `ImageResource.Onboarding.hero`, `foo.logo`.
+# Which of its members count as symbols is decided in `_chain_symbols`.
+_IDENTIFIER = r"[A-Za-z_]\w*"
+_MEMBER_CHAIN = re.compile(
+    rf"(?:(?<!\w)(?P<head>{_IDENTIFIER}))?(?P<members>(?:\s*\.\s*{_IDENTIFIER})+)"
 )
+_MEMBER_NAME = re.compile(_IDENTIFIER)
+_CALL_FOLLOWS = re.compile(r"\s*\(")
+# A chain without a head that follows one of these is a member of an expression
+# (`foo().logo`, `items[0].logo`, `view?.logo`), not an implicit member. The same holds
+# after a word character (`pair.0.logo`).
+_EXPRESSION_END = frozenset(")]?!")
 
 _IB_ATTRIBUTE_VALUE = re.compile(r'=\s*"([^"]+)"')
 _PLIST_STRING = re.compile(r"<string>([^<]+)</string>")
@@ -69,11 +79,15 @@ class References:
 
     def uses(self, asset_name: str) -> bool:
         """Return True if `asset_name` may be referenced (conservative)."""
-        if asset_name in self.names:
+        # A namespaced asset is also kept by its bare name: `"onboarding/" + "hero"`.
+        spellings = {asset_name, asset_name.rsplit("/", 1)[-1]}
+        if not spellings.isdisjoint(self.names):
             return True
         if not swift_symbol_candidates(asset_name).isdisjoint(self.symbols):
             return True
-        return any(pattern.fullmatch(asset_name) for pattern in self.patterns)
+        return any(
+            pattern.fullmatch(spelling) for pattern in self.patterns for spelling in spellings
+        )
 
 
 def to_swift_symbol(asset_name: str) -> str:
@@ -147,6 +161,33 @@ def _block_lines(content: str) -> list[str]:
     return [line.strip() for line in content.splitlines()]
 
 
+def _chain_symbols(code: str) -> set[str]:
+    """Return every member that may be a generated asset symbol.
+
+    Implicit chains (`.logo`, `.Onboarding.hero`) give all their members. Chains with a
+    head give the members after the first capitalised name, so `ImageResource.logo`,
+    `ImageResource.Onboarding.hero` and `Asset.hero` count while `view.icon` does not.
+    A member that is called (`.padding()`) is a method, never an asset.
+    """
+    symbols: set[str] = set()
+    for match in _MEMBER_CHAIN.finditer(code):
+        head = match.group("head")
+        members = _MEMBER_NAME.findall(match.group("members"))
+        if _CALL_FOLLOWS.match(code, match.end()):
+            members.pop()
+        if head is None:
+            before = code[match.start() - 1] if match.start() else ""
+            if before in _EXPRESSION_END or before.isalnum() or before == "_":
+                continue
+            symbols.update(members)
+            continue
+        chain = [head, *members]
+        first_type = next((i for i, name in enumerate(chain) if name[0].isupper()), None)
+        if first_type is not None:
+            symbols.update(chain[first_type + 1 :])
+    return symbols
+
+
 def _scan_code(
     content: str,
     *,
@@ -173,9 +214,7 @@ def _scan_code(
     code_chunks.append(content[last_end:])
 
     if is_swift:
-        code = "".join(code_chunks)
-        symbols.update(match.group(1) for match in _IMPLICIT_MEMBER.finditer(code))
-        symbols.update(match.group(1) for match in _EXPLICIT_RESOURCE.finditer(code))
+        symbols.update(_chain_symbols("".join(code_chunks)))
 
 
 def iter_source_files(source_dir: Path, config: ScannerConfig) -> list[Path]:

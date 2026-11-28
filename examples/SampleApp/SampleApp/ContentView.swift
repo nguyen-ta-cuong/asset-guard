@@ -13,6 +13,8 @@ struct ContentView: View {
             Image(.appLogo)                       // Xcode 15+ generated symbol
             Image("hero_banner")                  // string literal
             Image("onboarding_\(page)")           // dynamic name -> keeps onboarding_*
+            Image("Onboarding/welcome")           // "Provides Namespace" folder, by full name
+            Image(.Onboarding.hero)               // ...and by its nested generated symbol
             // Image("unused_promo")              // comments do not count
         }
     }

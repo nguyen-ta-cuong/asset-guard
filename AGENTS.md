@@ -68,11 +68,13 @@ apply_removal → _scan again] → render → _exit_for_findings`. Imports go on
 
 - **Exact name:** any string literal in `.swift/.m/.mm/.h` (comments stripped), each line
   of a Swift multi-line string, any IB `="value"` attribute, any plist `<string>`.
+  A namespaced `onboarding/hero` also matches by bare name (`"hero"`, patterns too).
 - **Dynamic pattern:** interpolation or printf specifiers become a full-match regex
   (`"icon_\(i)"`, `#"icon_\#(i)"#`, `@"icon_%d"` → `icon_.*`). Needs ≥ 2 alphanumeric
   literal characters, otherwise `"\(a)_\(b)"` would match everything.
-- **Swift symbol** (`.swift` only): any `swift_symbol_candidates(name)` seen as `.logo`
-  or `ImageResource|UIImage|NSImage|Image.logo`.
+- **Swift symbol** (`.swift` only): any `swift_symbol_candidates(name)` in a member chain:
+  every member of an implicit chain (`.logo`, `.Onboarding.hero`), or the members after
+  the first capitalised name (`ImageResource.Onboarding.hero`, not `view.icon`).
 
 Matching is case-sensitive and global: one match anywhere keeps the asset. The regex
 tokenizers (`_SWIFT_TOKEN`, `_C_TOKEN`) know plain, raw, and multi-line strings, comments,
@@ -126,8 +128,8 @@ permission denied, `130` interrupted. `--summary-file` appends; `--report-json` 
 - pytest + `tmp_path`, no real Xcode projects. `test_scanner.py` also covers `catalog.py`
   and `duplicates.py`. CLI tests use `CliRunner` on `cli.app` and stub with
   `monkeypatch.setattr(cli, "run_audit", lambda *_args: report)` / `cli.worktree_state`.
-- `action-smoke` in `ci.yml` runs the action on `examples/SampleApp` and expects 9 assets:
-  7 used, 1 ignored, 1 unused (`unused_promo`, the only one removed), 1 duplicate group.
+- `action-smoke` in `ci.yml` runs the action on `examples/SampleApp` and expects 11 assets:
+  9 used, 1 ignored, 1 unused (`unused_promo`, the only one removed), 1 duplicate group.
 
 ## Change checklist
 

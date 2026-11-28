@@ -29,6 +29,13 @@ generated Swift symbol (`Image(.icon)`, `UIImage.icon`, `ImageResource.icon`). T
 result can be an unused asset kept by mistake (harmless), but should not be a used asset
 deleted.
 
+Folders with **Provides Namespace** ticked are resolved: an image set `hero` inside
+`onboarding` is the asset `onboarding/hero`. It counts as used when the code says
+`Image("onboarding/hero")`, uses the nested symbol (`Image(.Onboarding.hero)`,
+`ImageResource.Onboarding.hero`), or contains the bare string `"hero"`, because the
+folder prefix may be added with `+`. No ignore glob is needed for these. Folders without
+the tick do not change the name.
+
 Assets the scanner cannot see go in the ignore list. Examples are names loaded from a
 server or remote config, or names built in ways other than interpolation or format
 strings:
@@ -38,6 +45,9 @@ strings:
 ignore = ["seasonal_*", "promo_banner_*"]
 exclude-dirs = ["Generated"]   # extra source dirs to skip
 ```
+
+Globs match the full asset name, so a namespaced asset needs its folder:
+`"onboarding/*"` matches `onboarding/hero`, and `"hero"` does not.
 
 ## Exit codes
 

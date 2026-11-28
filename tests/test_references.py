@@ -84,6 +84,96 @@ def test_swift_symbols_implicit_and_explicit(sources):
 
 
 @pytest.mark.parametrize(
+    "code",
+    [
+        "Image(.Onboarding.hero)",
+        "let a = ImageResource.Onboarding.hero",
+        "let a = UIImage(resource: .Onboarding.hero)",
+        "Image(\n    .Onboarding\n    .hero\n)",
+        "typealias O = ImageResource.Onboarding\nlet a = O.hero",
+        "let a = Asset.Onboarding.hero.image",
+        "let a = self.theme.Onboarding.hero",
+    ],
+)
+def test_nested_namespace_symbols_keep_the_asset(sources, code):
+    _write(sources, "View.swift", code)
+
+    refs = collect_used_references(sources)
+
+    assert refs.uses("onboarding/hero")
+    assert not refs.uses("onboarding/other")
+
+
+def test_deeply_nested_namespace_symbol(sources):
+    _write(sources, "View.swift", "Image(.OnboardingFlow.StepOne.bigHero)")
+
+    refs = collect_used_references(sources)
+
+    assert refs.uses("Onboarding Flow/Step One/big hero")
+    assert not refs.uses("Onboarding Flow/Step One/small hero")
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "let a = view.hero",  # property of a value, not a type member
+        "let a = make().hero",
+        "let a = items[0].hero",
+        "let a = model?.hero",
+        "let a = model!.hero",
+        "let a = pair.0.hero",
+        "let a = Onboarding.hero()",  # method call
+        "view.Onboarding.hero()",
+        "// Image(.Onboarding.hero)",
+        "/* ImageResource.Onboarding.hero */",
+        'let a = "ImageResource.Onboarding.heroic"',
+    ],
+)
+def test_members_that_are_not_asset_symbols(sources, code):
+    _write(sources, "View.swift", code)
+
+    refs = collect_used_references(sources)
+
+    assert "hero" not in refs.symbols
+    assert not refs.uses("onboarding/hero")
+
+
+@pytest.mark.parametrize(
+    ("code", "used", "unused"),
+    [
+        ('Image("onboarding/hero")', ["onboarding/hero"], ["onboarding/other", "hero2"]),
+        # The prefix may be concatenated, so the bare name keeps a namespaced asset.
+        ('Image("onboarding/" + "hero")', ["onboarding/hero", "hero"], ["onboarding/other"]),
+        ('Image(folder + "/step_\\(i)")', [], ["onboarding/hero"]),
+        ('Image(folder + "step_\\(i)")', ["onboarding/step_1", "step_2"], ["onboarding/hero"]),
+        ('Image("onboarding/\\(name)")', ["onboarding/hero"], ["hero", "other/hero"]),
+        # A full name never keeps a different asset that only shares the bare name.
+        ('Image("settings/hero")', ["settings/hero"], ["onboarding/hero", "hero"]),
+    ],
+)
+def test_namespaced_names_in_strings(sources, code, used, unused):
+    _write(sources, "View.swift", code)
+
+    refs = collect_used_references(sources)
+
+    for name in used:
+        assert refs.uses(name), name
+    for name in unused:
+        assert not refs.uses(name), name
+
+
+def test_objc_and_interface_builder_namespaced_names(sources):
+    _write(sources, "Legacy.m", 'UIImage *a = [UIImage imageNamed:@"onboarding/hero"];')
+    _write(sources, "Main.storyboard", '<imageView image="settings/gear"/>')
+
+    refs = collect_used_references(sources)
+
+    assert refs.uses("onboarding/hero")
+    assert refs.uses("settings/gear")
+    assert not refs.uses("onboarding/gear")
+
+
+@pytest.mark.parametrize(
     ("code", "used", "unused"),
     [
         ('UIImage(named: "icon_\\(index)")', ["icon_1", "icon_20"], ["icon", "badge_1"]),
