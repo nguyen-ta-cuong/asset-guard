@@ -6,6 +6,7 @@ from asset_guard.config import ScannerConfig
 from asset_guard.references import (
     collect_used_references,
     iter_source_files,
+    name_spellings,
     swift_symbol_candidates,
     to_swift_symbol,
 )
@@ -81,6 +82,148 @@ def test_swift_symbols_implicit_and_explicit(sources):
     assert refs.uses("tab_home")
     assert "notASymbol" not in refs.symbols
     assert "padding" not in refs.symbols
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "Image(.Onboarding.hero)",
+        "let a = ImageResource.Onboarding.hero",
+        "let a = UIImage(resource: .Onboarding.hero)",
+        "Image(\n    .Onboarding\n    .hero\n)",
+        "typealias O = ImageResource.Onboarding\nlet a = O.hero",
+        "let a = Asset.Onboarding.hero.image",
+        "let a = self.theme.Onboarding.hero",
+    ],
+)
+def test_nested_namespace_symbols_keep_the_asset(sources, code):
+    _write(sources, "View.swift", code)
+
+    refs = collect_used_references(sources)
+
+    assert refs.uses("onboarding/hero")
+    assert not refs.uses("onboarding/other")
+
+
+@pytest.mark.parametrize(
+    ("code", "symbols"),
+    [
+        ("let a = flag ? .logoA : .logoB", {"logoA", "logoB"}),
+        ("let a = cache[key] ?? .placeholder", {"placeholder"}),
+        ("let a = flag ? .Onboarding.hero : .Onboarding.welcome", {"hero", "welcome"}),
+        ("let a: ImageResource = flag\n    ? .logoA\n    : .logoB", {"logoA", "logoB"}),
+        ("let a = Image . spaced", {"spaced"}),
+        ("let a = Image. spaced", {"spaced"}),
+        ("return .hero", {"hero"}),
+        ("case .Onboarding.hero: break", {"hero"}),
+        ("Image(.onboarding.hero)", {"hero"}),
+        # A `(` on the next line starts a new statement, so `hero` is not a call.
+        ("let a: ImageResource = .Onboarding.hero\n(x, y) = (1, 2)", {"hero"}),
+        ("let a = images.map { $0.Image.logo }", {"logo"}),
+        ("make()\n    .modifier\n    .trailing", {"modifier", "trailing"}),
+        ("let a = [.first, .second]", {"first", "second"}),
+    ],
+)
+def test_implicit_members_after_operators_and_line_breaks(sources, code, symbols):
+    _write(sources, "View.swift", code)
+
+    assert symbols <= collect_used_references(sources).symbols
+
+
+@pytest.mark.parametrize(
+    ("code", "asset", "sibling"),
+    [
+        ("Image(.onboardingHero)", "onboarding/hero", "onboarding/other"),  # flattened symbol
+        ("Image(.onboardingHero)", "Onboarding/hero", "Onboarding/other"),
+        ("Image(.vipBadge)", "VIP/badge", "VIP/other"),
+        ("Image(.VIP.badge)", "VIP/badge", "VIP/other"),
+        ("Image(.abcLogo)", "ABC_logo", "ABC_other"),
+    ],
+)
+def test_flattened_namespace_symbols_keep_the_asset(sources, code, asset, sibling):
+    _write(sources, "View.swift", code)
+
+    refs = collect_used_references(sources)
+
+    assert refs.uses(asset)
+    assert not refs.uses(sibling)
+
+
+def test_name_spellings():
+    assert name_spellings("hero") == {"hero"}
+    assert name_spellings("a/b/hero") == {"a/b/hero", "b/hero", "/b/hero", "hero", "/hero"}
+
+
+def test_deeply_nested_namespace_symbol(sources):
+    _write(sources, "View.swift", "Image(.OnboardingFlow.StepOne.bigHero)")
+
+    refs = collect_used_references(sources)
+
+    assert refs.uses("Onboarding Flow/Step One/big hero")
+    assert not refs.uses("Onboarding Flow/Step One/small hero")
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "let a = view.hero",  # property of a value, not a type member
+        "let a = make().hero",
+        "let a = items[0].hero",
+        "let a = model?.hero",
+        "let a = model!.hero",
+        "let a = pair.0.hero",
+        "let a = Onboarding.hero()",  # method call
+        "view.Onboarding.hero()",
+        "// Image(.Onboarding.hero)",
+        "/* ImageResource.Onboarding.hero */",
+        'let a = "ImageResource.Onboarding.hero.x"',
+    ],
+)
+def test_members_that_are_not_asset_symbols(sources, code):
+    _write(sources, "View.swift", code)
+
+    refs = collect_used_references(sources)
+
+    assert "hero" not in refs.symbols
+    assert not refs.uses("onboarding/hero")
+
+
+@pytest.mark.parametrize(
+    ("code", "used", "unused"),
+    [
+        ('Image("onboarding/hero")', ["onboarding/hero"], ["onboarding/other", "hero2"]),
+        # The prefix may be concatenated, so the bare name keeps a namespaced asset.
+        ('Image("onboarding/" + "hero")', ["onboarding/hero", "hero"], ["onboarding/other"]),
+        ('Image(folder + "/hero")', ["onboarding/hero", "a/b/hero"], ["hero", "onboarding/her"]),
+        ('Image(folder + "/step_\\(i)")', ["onboarding/step_1"], ["onboarding/hero", "step_1"]),
+        ('Image(root + "b/hero")', ["a/b/hero", "b/hero"], ["a/c/hero", "ab/hero"]),
+        ('Image(root + "/b/hero")', ["a/b/hero"], ["b/hero", "a/c/b/her"]),
+        ('Image(folder + "step_\\(i)")', ["onboarding/step_1", "step_2"], ["onboarding/hero"]),
+        ('Image("onboarding/\\(name)")', ["onboarding/hero"], ["hero", "other/hero"]),
+        # A full name never keeps a different asset that only shares the bare name.
+        ('Image("settings/hero")', ["settings/hero"], ["onboarding/hero", "hero"]),
+    ],
+)
+def test_namespaced_names_in_strings(sources, code, used, unused):
+    _write(sources, "View.swift", code)
+
+    refs = collect_used_references(sources)
+
+    for name in used:
+        assert refs.uses(name), name
+    for name in unused:
+        assert not refs.uses(name), name
+
+
+def test_objc_and_interface_builder_namespaced_names(sources):
+    _write(sources, "Legacy.m", 'UIImage *a = [UIImage imageNamed:@"onboarding/hero"];')
+    _write(sources, "Main.storyboard", '<imageView image="settings/gear"/>')
+
+    refs = collect_used_references(sources)
+
+    assert refs.uses("onboarding/hero")
+    assert refs.uses("settings/gear")
+    assert not refs.uses("onboarding/gear")
 
 
 @pytest.mark.parametrize(

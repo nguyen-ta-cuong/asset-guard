@@ -307,6 +307,42 @@ def test_namespace_resolution_and_duplicate_asset_name(tmp_path):
     assert any(issue.issue_type == IssueType.DUPLICATE_ASSET_NAME for issue in report.issues)
 
 
+def test_namespaced_assets_are_used_by_nested_symbol_string_or_bare_name(tmp_path):
+    xcassets = tmp_path / "Assets.xcassets"
+    onboarding = xcassets / "Onboarding Flow"
+    step = onboarding / "Step One"
+    step.mkdir(parents=True)
+    for folder in (onboarding, step):
+        (folder / "Contents.json").write_text(
+            json.dumps({"properties": {"provides-namespace": True}}),
+            encoding="utf-8",
+        )
+
+    names = ["by_symbol", "by_string", "by_bare_name", "never_referenced"]
+    for name in names:
+        _create_imageset(
+            step,
+            name,
+            {"images": [{"filename": f"{name}.svg", "idiom": "universal"}]},
+            files={f"{name}.svg": f"<svg id='{name}'/>".encode()},
+        )
+
+    sources = tmp_path / "Sources"
+    sources.mkdir()
+    (sources / "View.swift").write_text(
+        "Image(.OnboardingFlow.StepOne.bySymbol)\n"
+        'Image("Onboarding Flow/Step One/by_string")\n'
+        'Image(prefix + "by_bare_name")\n'
+        "// Image(.OnboardingFlow.StepOne.neverReferenced)\n",
+        encoding="utf-8",
+    )
+
+    report = AssetScanner().scan(xcassets, sources)
+
+    assert report.total_assets == len(names)
+    assert report.unused_assets == ["Onboarding Flow/Step One/never_referenced"]
+
+
 def test_scan_raises_for_missing_directories(tmp_path):
     valid_dir = tmp_path / "Valid"
     valid_dir.mkdir()

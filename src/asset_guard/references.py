@@ -8,7 +8,11 @@ unused. An asset counts as used when:
 - its name matches an interpolated / format string such as `"icon_\\(i)"` or
   `@"icon_%d"` (dynamic names);
 - one of its possible Xcode-generated Swift symbols appears as `.symbol` or
-  `ImageResource.symbol` / `UIImage.symbol` / `Image.symbol`;
+  `ImageResource.symbol` / `UIImage.symbol` / `Image.symbol`, also nested under a
+  namespace (`.Onboarding.hero`) or behind any capitalised type (`Asset.hero`);
+- it lives in a `provides-namespace` folder and the end of its name (`hero` or `/hero`
+  for `onboarding/hero`) appears as a string or matches a dynamic string, since the
+  folder prefix may be concatenated;
 - its name equals any attribute value in a storyboard / XIB, or any `<string>` in a plist.
 
 False "used" results only mean an asset is kept. False "unused" results break apps.
@@ -46,17 +50,26 @@ _FORMAT_SPECIFIER = re.compile(
 )
 _MIN_PATTERN_LITERAL_CHARS = 2
 
-# `.logo` used as an implicit member (not `foo.logo`), and not a method call `.logo(`.
-_IMPLICIT_MEMBER = re.compile(r"(?<![\w)\]?!])\.([A-Za-z_]\w*)\b(?!\s*\()")
-_EXPLICIT_RESOURCE = re.compile(
-    r"\b(?:ImageResource|UIImage|NSImage|Image)\s*\.\s*([A-Za-z_]\w*)\b(?!\s*\()"
+# A member chain: `.logo`, `.Onboarding.hero`, `ImageResource.Onboarding.hero`, `foo.logo`.
+# Which of its members count as symbols is decided in `_chain_symbols`.
+_IDENTIFIER = r"[A-Za-z_]\w*"
+_MEMBER_CHAIN = re.compile(
+    rf"(?:(?<!\w)(?P<head>{_IDENTIFIER})\s*)?"
+    rf"(?P<members>\.\s*{_IDENTIFIER}(?:\s*\.\s*{_IDENTIFIER})*)"
 )
+_MEMBER = re.compile(rf"\.\s*({_IDENTIFIER})")
+# Same line only: a `(` on the next line starts a new statement, not a call.
+_CALL_FOLLOWS = re.compile(r"[ \t]*\(")
+# A dot written directly after one of these (or after a word character) reads a member
+# of a value: `foo().logo`, `items[0].logo`, `view?.logo`, `view.logo`. After anything
+# else, whitespace included, it starts an implicit member: `(.logo`, `? .logo`, `?? .logo`.
+_VALUE_END = frozenset(")]?!")
 
 _IB_ATTRIBUTE_VALUE = re.compile(r'=\s*"([^"]+)"')
 _PLIST_STRING = re.compile(r"<string>([^<]+)</string>")
 
 _SYMBOL_SPLIT_PATTERN = re.compile(r"[^A-Za-z0-9]+")
-_LEADING_UPPER_RUN = re.compile(r"^([A-Z]+)(?=[A-Z][a-z]|$)")
+_LEADING_UPPER_RUN = re.compile(r"^([A-Z]+)(?=[A-Z][a-z]|[^A-Za-z0-9]|$)")
 
 
 @dataclass(frozen=True)
@@ -69,11 +82,28 @@ class References:
 
     def uses(self, asset_name: str) -> bool:
         """Return True if `asset_name` may be referenced (conservative)."""
-        if asset_name in self.names:
+        spellings = name_spellings(asset_name)
+        if not spellings.isdisjoint(self.names):
             return True
         if not swift_symbol_candidates(asset_name).isdisjoint(self.symbols):
             return True
-        return any(pattern.fullmatch(asset_name) for pattern in self.patterns)
+        return any(
+            pattern.fullmatch(spelling) for pattern in self.patterns for spelling in spellings
+        )
+
+
+def name_spellings(asset_name: str) -> set[str]:
+    """Return the strings that may name an asset once a folder prefix is concatenated.
+
+    `a/b/hero` gives itself plus `b/hero`, `/b/hero`, `hero` and `/hero`, which covers
+    `"a/" + "b/hero"` and `folder + "/hero"`. A name without a namespace gives only itself.
+    """
+    parts = asset_name.split("/")
+    spellings = {asset_name}
+    for index in range(1, len(parts)):
+        suffix = "/".join(parts[index:])
+        spellings.update((suffix, f"/{suffix}"))
+    return spellings
 
 
 def to_swift_symbol(asset_name: str) -> str:
@@ -147,6 +177,30 @@ def _block_lines(content: str) -> list[str]:
     return [line.strip() for line in content.splitlines()]
 
 
+def _chain_symbols(code: str) -> set[str]:
+    """Return every member that may be a generated asset symbol.
+
+    A member counts when it starts an implicit member expression (`.logo`), or when it
+    comes after a member that counts or after a capitalised name. So `.Onboarding.hero`,
+    `ImageResource.Onboarding.hero` and `Asset.hero` give `hero`, while `view.icon` gives
+    nothing. A chain that ends in a call (`.padding()`) ends in a method, not an asset.
+    """
+    symbols: set[str] = set()
+    for chain in _MEMBER_CHAIN.finditer(code):
+        head = chain.group("head")
+        counts = head is not None and head[0].isupper()
+        called_at = chain.end() if _CALL_FOLLOWS.match(code, chain.end()) else -1
+        for member in _MEMBER.finditer(code, chain.start("members"), chain.end()):
+            name = member.group(1)
+            before = code[member.start() - 1] if member.start() else ""
+            implicit = not (before in _VALUE_END or before.isalnum() or before == "_")
+            if (counts or implicit) and member.end() != called_at:
+                symbols.add(name)
+                counts = True
+            counts = counts or name[0].isupper()
+    return symbols
+
+
 def _scan_code(
     content: str,
     *,
@@ -173,9 +227,7 @@ def _scan_code(
     code_chunks.append(content[last_end:])
 
     if is_swift:
-        code = "".join(code_chunks)
-        symbols.update(match.group(1) for match in _IMPLICIT_MEMBER.finditer(code))
-        symbols.update(match.group(1) for match in _EXPLICIT_RESOURCE.finditer(code))
+        symbols.update(_chain_symbols("".join(code_chunks)))
 
 
 def iter_source_files(source_dir: Path, config: ScannerConfig) -> list[Path]:
