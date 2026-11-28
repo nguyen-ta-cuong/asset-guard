@@ -30,11 +30,17 @@ result can be an unused asset kept by mistake (harmless), but should not be a us
 deleted.
 
 Folders with **Provides Namespace** ticked are resolved: an image set `hero` inside
-`onboarding` is the asset `onboarding/hero`. It counts as used when the code says
-`Image("onboarding/hero")`, uses the nested symbol (`Image(.Onboarding.hero)`,
-`ImageResource.Onboarding.hero`), or contains the bare string `"hero"`, because the
-folder prefix may be added with `+`. No ignore glob is needed for these. Folders without
-the tick do not change the name.
+`onboarding` is the asset `onboarding/hero`. It counts as used when the code:
+
+- says `Image("onboarding/hero")`;
+- uses a generated symbol, nested (`Image(.Onboarding.hero)`,
+  `ImageResource.Onboarding.hero`) or flattened (`Image(.onboardingHero)`);
+- contains the end of the name as a string or dynamic name (`"hero"`, `"/hero"`,
+  `"/hero_\(i)"`), because the folder prefix may be added with `+`.
+
+No ignore glob is needed for these. Folders without the tick do not change the name.
+A symbol counts after any capitalised name (`Asset.hero`, `Theme.hero`), so an asset
+named like a common static member (`red`, `zero`, `shared`) is rarely reported unused.
 
 Assets the scanner cannot see go in the ignore list. Examples are names loaded from a
 server or remote config, or names built in ways other than interpolation or format

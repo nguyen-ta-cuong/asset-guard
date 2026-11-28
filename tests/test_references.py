@@ -6,6 +6,7 @@ from asset_guard.config import ScannerConfig
 from asset_guard.references import (
     collect_used_references,
     iter_source_files,
+    name_spellings,
     swift_symbol_candidates,
     to_swift_symbol,
 )
@@ -112,6 +113,12 @@ def test_nested_namespace_symbols_keep_the_asset(sources, code):
         ("let a = flag ? .Onboarding.hero : .Onboarding.welcome", {"hero", "welcome"}),
         ("let a: ImageResource = flag\n    ? .logoA\n    : .logoB", {"logoA", "logoB"}),
         ("let a = Image . spaced", {"spaced"}),
+        ("let a = Image. spaced", {"spaced"}),
+        ("return .hero", {"hero"}),
+        ("case .Onboarding.hero: break", {"hero"}),
+        ("Image(.onboarding.hero)", {"hero"}),
+        # A `(` on the next line starts a new statement, so `hero` is not a call.
+        ("let a: ImageResource = .Onboarding.hero\n(x, y) = (1, 2)", {"hero"}),
         ("let a = images.map { $0.Image.logo }", {"logo"}),
         ("make()\n    .modifier\n    .trailing", {"modifier", "trailing"}),
         ("let a = [.first, .second]", {"first", "second"}),
@@ -121,6 +128,30 @@ def test_implicit_members_after_operators_and_line_breaks(sources, code, symbols
     _write(sources, "View.swift", code)
 
     assert symbols <= collect_used_references(sources).symbols
+
+
+@pytest.mark.parametrize(
+    ("code", "asset"),
+    [
+        ("Image(.onboardingHero)", "onboarding/hero"),  # flattened symbol
+        ("Image(.onboardingHero)", "Onboarding/hero"),
+        ("Image(.vipBadge)", "VIP/badge"),
+        ("Image(.VIP.badge)", "VIP/badge"),
+        ("Image(.abcLogo)", "ABC_logo"),
+    ],
+)
+def test_flattened_namespace_symbols_keep_the_asset(sources, code, asset):
+    _write(sources, "View.swift", code)
+
+    refs = collect_used_references(sources)
+
+    assert refs.uses(asset)
+    assert not refs.uses("onboarding/other")
+
+
+def test_name_spellings():
+    assert name_spellings("hero") == {"hero"}
+    assert name_spellings("a/b/hero") == {"a/b/hero", "b/hero", "/b/hero", "hero", "/hero"}
 
 
 def test_deeply_nested_namespace_symbol(sources):
@@ -145,7 +176,7 @@ def test_deeply_nested_namespace_symbol(sources):
         "view.Onboarding.hero()",
         "// Image(.Onboarding.hero)",
         "/* ImageResource.Onboarding.hero */",
-        'let a = "ImageResource.Onboarding.heroic"',
+        'let a = "ImageResource.Onboarding.hero.x"',
     ],
 )
 def test_members_that_are_not_asset_symbols(sources, code):
@@ -163,7 +194,10 @@ def test_members_that_are_not_asset_symbols(sources, code):
         ('Image("onboarding/hero")', ["onboarding/hero"], ["onboarding/other", "hero2"]),
         # The prefix may be concatenated, so the bare name keeps a namespaced asset.
         ('Image("onboarding/" + "hero")', ["onboarding/hero", "hero"], ["onboarding/other"]),
-        ('Image(folder + "/step_\\(i)")', [], ["onboarding/hero"]),
+        ('Image(folder + "/hero")', ["onboarding/hero", "a/b/hero"], ["hero", "onboarding/her"]),
+        ('Image(folder + "/step_\\(i)")', ["onboarding/step_1"], ["onboarding/hero", "step_1"]),
+        ('Image(root + "b/hero")', ["a/b/hero", "b/hero"], ["a/c/hero", "ab/hero"]),
+        ('Image(root + "/b/hero")', ["a/b/hero"], ["b/hero", "a/c/b/her"]),
         ('Image(folder + "step_\\(i)")', ["onboarding/step_1", "step_2"], ["onboarding/hero"]),
         ('Image("onboarding/\\(name)")', ["onboarding/hero"], ["hero", "other/hero"]),
         # A full name never keeps a different asset that only shares the bare name.

@@ -10,8 +10,9 @@ unused. An asset counts as used when:
 - one of its possible Xcode-generated Swift symbols appears as `.symbol` or
   `ImageResource.symbol` / `UIImage.symbol` / `Image.symbol`, also nested under a
   namespace (`.Onboarding.hero`) or behind any capitalised type (`Asset.hero`);
-- it lives in a `provides-namespace` folder and its bare name (`hero` for
-  `onboarding/hero`) appears as a string, since the prefix may be concatenated;
+- it lives in a `provides-namespace` folder and the end of its name (`hero` or `/hero`
+  for `onboarding/hero`) appears as a string or matches a dynamic string, since the
+  folder prefix may be concatenated;
 - its name equals any attribute value in a storyboard / XIB, or any `<string>` in a plist.
 
 False "used" results only mean an asset is kept. False "unused" results break apps.
@@ -57,7 +58,8 @@ _MEMBER_CHAIN = re.compile(
     rf"(?P<members>\.\s*{_IDENTIFIER}(?:\s*\.\s*{_IDENTIFIER})*)"
 )
 _MEMBER = re.compile(rf"\.\s*({_IDENTIFIER})")
-_CALL_FOLLOWS = re.compile(r"\s*\(")
+# Same line only: a `(` on the next line starts a new statement, not a call.
+_CALL_FOLLOWS = re.compile(r"[ \t]*\(")
 # A dot written directly after one of these (or after a word character) reads a member
 # of a value: `foo().logo`, `items[0].logo`, `view?.logo`, `view.logo`. After anything
 # else, whitespace included, it starts an implicit member: `(.logo`, `? .logo`, `?? .logo`.
@@ -67,7 +69,7 @@ _IB_ATTRIBUTE_VALUE = re.compile(r'=\s*"([^"]+)"')
 _PLIST_STRING = re.compile(r"<string>([^<]+)</string>")
 
 _SYMBOL_SPLIT_PATTERN = re.compile(r"[^A-Za-z0-9]+")
-_LEADING_UPPER_RUN = re.compile(r"^([A-Z]+)(?=[A-Z][a-z]|$)")
+_LEADING_UPPER_RUN = re.compile(r"^([A-Z]+)(?=[A-Z][a-z]|[^A-Za-z0-9]|$)")
 
 
 @dataclass(frozen=True)
@@ -80,8 +82,7 @@ class References:
 
     def uses(self, asset_name: str) -> bool:
         """Return True if `asset_name` may be referenced (conservative)."""
-        # A namespaced asset is also kept by its bare name: `"onboarding/" + "hero"`.
-        spellings = {asset_name, asset_name.rsplit("/", 1)[-1]}
+        spellings = name_spellings(asset_name)
         if not spellings.isdisjoint(self.names):
             return True
         if not swift_symbol_candidates(asset_name).isdisjoint(self.symbols):
@@ -89,6 +90,20 @@ class References:
         return any(
             pattern.fullmatch(spelling) for pattern in self.patterns for spelling in spellings
         )
+
+
+def name_spellings(asset_name: str) -> set[str]:
+    """Return the strings that may name an asset once a folder prefix is concatenated.
+
+    `a/b/hero` gives itself plus `b/hero`, `/b/hero`, `hero` and `/hero`, which covers
+    `"a/" + "b/hero"` and `folder + "/hero"`. A name without a namespace gives only itself.
+    """
+    parts = asset_name.split("/")
+    spellings = {asset_name}
+    for index in range(1, len(parts)):
+        suffix = "/".join(parts[index:])
+        spellings.update((suffix, f"/{suffix}"))
+    return spellings
 
 
 def to_swift_symbol(asset_name: str) -> str:
@@ -168,7 +183,7 @@ def _chain_symbols(code: str) -> set[str]:
     A member counts when it starts an implicit member expression (`.logo`), or when it
     comes after a member that counts or after a capitalised name. So `.Onboarding.hero`,
     `ImageResource.Onboarding.hero` and `Asset.hero` give `hero`, while `view.icon` gives
-    nothing. A member that is called (`.padding()`) is a method, never an asset.
+    nothing. A chain that ends in a call (`.padding()`) ends in a method, not an asset.
     """
     symbols: set[str] = set()
     for chain in _MEMBER_CHAIN.finditer(code):

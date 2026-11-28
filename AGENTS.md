@@ -68,7 +68,7 @@ apply_removal → _scan again] → render → _exit_for_findings`. Imports go on
 
 - **Exact name:** any string literal in `.swift/.m/.mm/.h` (comments stripped), each line
   of a Swift multi-line string, any IB `="value"` attribute, any plist `<string>`.
-  A namespaced `onboarding/hero` also matches by bare name (`"hero"`, patterns too).
+  A namespaced `a/b/hero` also matches by any tail (`"b/hero"`, `"/hero"`; patterns too).
 - **Dynamic pattern:** interpolation or printf specifiers become a full-match regex
   (`"icon_\(i)"`, `#"icon_\#(i)"#`, `@"icon_%d"` → `icon_.*`). Needs ≥ 2 alphanumeric
   literal characters, otherwise `"\(a)_\(b)"` would match everything.
@@ -144,7 +144,7 @@ permission denied, `130` interrupted. `--summary-file` appends; `--report-json` 
 
 ## Known gaps
 
-- Names computed at runtime (server-driven, `+` concatenation, case conversion) cannot be
-  detected; users add them to `ignore`. JSON, YAML, `.strings`, and `project.pbxproj`
-  are not scanned, nor is anything outside `--source`.
+- Names computed at runtime (server-driven, case conversion, `+` other than a namespace
+  folder prefix) cannot be detected; users add them to `ignore`. JSON, YAML, `.strings`,
+  and `project.pbxproj` are not scanned, nor is anything outside `--source`.
 - Only `.imageset` is scanned. Duplicate detection is byte-exact and per file, not per asset.

@@ -63,7 +63,7 @@ jobs:
           test "$UNUSED_AFTER" = "0"
           test "$DUPLICATES" = "1"
           test ! -e "$catalog/unused_promo.imageset"
-          python3 -c 'import json,sys; s = json.load(open("out/audit.json"))["summary"]; assert (s["total_assets"], s["used_assets_count"]) == (11, 9), s'
+          python3 -c 'import json; s = json.load(open("out/audit.json"))["summary"]; assert (s["total_assets"], s["used_assets_count"]) == (11, 9), s'
           for kept in app_logo hero_banner hero_banner_copy onboarding_1 onboarding_2 objc_badge tab_home seasonal_xmas Onboarding/hero Onboarding/welcome; do
             test -d "$catalog/$kept.imageset"
           done
