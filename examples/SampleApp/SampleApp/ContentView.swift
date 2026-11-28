@@ -1,5 +1,10 @@
 import SwiftUI
 
+// A bare quote inside a multi-line string must not hide the references below it.
+let displayNote = """
+Designed for the 6.1" display
+"""
+
 struct ContentView: View {
     let page: Int
 

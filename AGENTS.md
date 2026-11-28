@@ -1,188 +1,148 @@
 # AGENTS.md
 
-Guidance for AI coding agents (and humans) working on **asset-guard**.
+**asset-guard** is a Python CLI that scans Xcode asset catalogs in CI before the app is
+built: `audit` reports unused/duplicate/broken image sets, `clean --apply` deletes unused.
 
-## Mission
+## Read this first
 
-`asset-guard` is a Python CLI for iOS developers. It scans Xcode asset catalogs
-(`.xcassets`) and runs in CI (GitHub Actions, Jenkins, …) **before the app is built**
-to:
-
-1. **Remove unused image assets**: image sets that nothing in the project references
-   (`asset-guard clean --apply`).
-2. **Surface duplicate image assets**: byte-identical files. They are reported and
-   gated with `--fail-on duplicates`, **never auto-deleted** (see the safety rules).
-
-It also reports broken image sets (bad `Contents.json`, missing files, missing
-`@2x`/`@3x`, vectors with an explicit scale, duplicate names).
-
-The most important property is **never deleting an asset that is still used**. A
-missing image is a runtime bug that the compiler does not catch. Every design decision
-below follows from this.
+- **Never report a used asset as unused.** `clean --apply` deletes whatever is reported
+  unused, and a missing image is a runtime bug the compiler does not catch. A false
+  "used" only keeps a few kilobytes. When in doubt, count the asset as used.
+- **Done means** `make lint && make test` pass, new behavior has a positive and a negative
+  test, and the files in [Change checklist](#change-checklist) are updated.
+- **Do not weaken** the removal safety rules, the JSON contract, or the exit codes.
+- **Ask before adding a runtime dependency.** Runtime is `typer` + `rich` only, because
+  the GitHub Action installs from source on every user's CI run.
 
 ## Commands
 
-The toolchain is `uv`, Python ≥ 3.12. Use the Makefile targets:
+- Toolchain is `uv`, Python ≥ 3.12. `make dev` installs, `make format` formats,
+  `make lint` runs `ruff format --check`, `ruff check`, `ty check src/`, and `make test`
+  runs pytest with a branch coverage gate (≥ 80%, currently ~99%).
+- Some tests: `uv run pytest tests/test_references.py -k raw --no-cov`. Without `--no-cov`
+  the coverage gate reports a failure although the tests pass.
+- Run from source: `uv run asset-guard audit examples/SampleApp`. After changing
+  dependencies or `version`, run `uv lock` (CI installs with `--locked`).
 
-| Task | Command |
-| --- | --- |
-| Install all deps | `make dev` (`uv sync --all-groups`) |
-| Lint + type-check | `make lint` (ruff format check, ruff check, `ty check src/`) |
-| Auto-format | `make format` |
-| Tests + coverage | `make test` (pytest, coverage gate **≥ 80%**, currently ~99%) |
-| Report only | `uv run asset-guard audit [PROJECT] [--fail-on unused,duplicates,broken,any]` |
-| Remove unused | `uv run asset-guard clean [PROJECT] [--apply] [--force]` |
-| Demo project | `uv run asset-guard audit examples/SampleApp` |
-
-Shared options: `--xcassets P` (repeatable), `--source P`, `--config P`,
-`--ignore GLOB` (repeatable), `--format text|json`, `--report-json P`,
-`--summary-file P`, `--no-color`, `-v`.
-
-Before you call a change done, run `make lint && make test`. Both must pass.
-
-## Layout and data flow
+## Layout
 
 ```text
 src/asset_guard/
-├── cli.py          # Typer app (audit, clean): path/config resolution, git safety, outputs, exit codes
-├── config.py       # ScannerConfig, defaults, .asset-guard.toml loading (tomllib), ignore globs
-├── models.py       # All data models: IssueType, FindingCategory, AssetIssue, DuplicateImage, AuditReport,
-│                   #   RemovalCandidate, RemovalPlan (pure, no I/O)
-├── catalog.py      # .xcassets side: discover catalogs, find .imageset dirs, resolve names, validate
-├── references.py   # Source side: Swift/ObjC strings, dynamic patterns, Swift symbols, IB attributes, plists
-├── duplicates.py   # Size pre-filter + SHA-256 grouping of identical files
-├── scanner.py      # AssetScanner orchestrator: catalogs + references + duplicates -> AuditReport
-├── cleaner.py      # plan_removal (pure), apply_removal (the ONLY place that deletes), git worktree check
-└── reporting.py    # Rich text (audit/clean) and Markdown summary rendering
-tests/              # one test module per source module (tmp_path fixtures, no real Xcode projects)
-action.yml                      # composite GitHub Action (setup-uv + uvx --from action path)
-.github/workflows/ci.yml        # lint/test + action smoke test against examples/SampleApp
-.github/workflows/publish.yml   # PyPI Trusted Publishing (OIDC) on GitHub Release published
-examples/SampleApp/             # tiny fake Xcode project covering every reference style
-docs/ci.md                      # user docs: GitHub Actions, Jenkins, exit codes, safety check
+├── cli.py         # Typer app (audit, clean): paths, config, git safety, outputs, exit codes
+├── config.py      # ScannerConfig, .asset-guard.toml loading, ignore globs
+├── models.py      # all shared dataclasses + the JSON shape (pure, no I/O)
+├── catalog.py     # discover catalogs, find .imageset dirs, resolve names, validate
+├── references.py  # Swift/ObjC strings, dynamic patterns, Swift symbols, IB, plists
+├── duplicates.py  # size pre-filter + SHA-256 grouping
+├── scanner.py     # AssetScanner: catalogs + references + duplicates -> AuditReport
+├── cleaner.py     # plan_removal, apply_removal (the ONLY place that deletes), git check
+└── reporting.py   # Rich text and Markdown summary
+action.yml  .github/workflows/{ci,publish}.yml  examples/SampleApp/  docs/ci.md
 ```
+
+Flow: `cli._prepare → _scan → AssetScanner.scan → [clean: plan_removal → worktree_state →
+apply_removal → _scan again] → render → _exit_for_findings`. Imports go one way:
+`cli → {scanner, cleaner, reporting} → {catalog, references, duplicates} → {config, models}`.
+
+## Business rules
+
+- **`--fail-on` categories:** `unused`; `duplicates` = identical files **plus**
+  `duplicate_asset_name`; `broken` = every other `IssueType`. A new `IssueType` lands in
+  `broken` unless mapped in `IssueType.category`.
+- **Classification order:** referenced → used; else matches an ignore glob → ignored; else
+  unused. Broken image sets are classified too, so `clean` can delete a broken unused one.
+- **Paths:** `PROJECT` defaults to the cwd; sources default to `PROJECT`; catalogs default
+  to every `*.xcassets` under it (none found → exit `2`).
+- **Config:** auto-loaded only from `PROJECT/.asset-guard.toml` (no upward search). Keys:
+  `ignore`, `exclude-dirs`, `expected-scales`, `scan-interface-builder`; unknown keys are
+  errors. `exclude-dirs` adds to the defaults and matches directory names at any depth,
+  for both catalog discovery and the source scan.
+- **Asset name:** the `.imageset` folder name, prefixed with parent folders only when
+  they set `provides-namespace`. Ignore globs match that full name (`fnmatchcase`).
+  Duplicate names are checked per catalog; the same name in two catalogs is fine.
+- **`clean`:** `applied` is true only with `--apply` **and** a non-empty plan (otherwise
+  the git check is skipped). After deleting, the re-scan makes `summary` and `--fail-on`
+  describe what remains; the `clean` section describes what was removed.
+
+## Reference detection: `References.uses(name)` is True if the asset *might* be used
+
+- **Exact name:** any string literal in `.swift/.m/.mm/.h` (comments stripped), each line
+  of a Swift multi-line string, any IB `="value"` attribute, any plist `<string>`.
+- **Dynamic pattern:** interpolation or printf specifiers become a full-match regex
+  (`"icon_\(i)"`, `#"icon_\#(i)"#`, `@"icon_%d"` → `icon_.*`). Needs ≥ 2 alphanumeric
+  literal characters, otherwise `"\(a)_\(b)"` would match everything.
+- **Swift symbol** (`.swift` only): any `swift_symbol_candidates(name)` seen as `.logo`
+  or `ImageResource|UIImage|NSImage|Image.logo`.
+
+Matching is case-sensitive and global: one match anywhere keeps the asset. The regex
+tokenizers (`_SWIFT_TOKEN`, `_C_TOKEN`) know plain, raw, and multi-line strings, comments,
+and C char literals; an unbalanced quote costs one line, never the rest of the file.
+A missed reference (false "unused") is a release-blocking bug; an extra match is
+acceptable. Never narrow a rule unless you can show no real reference style is lost.
+
+## Removal safety rules (enforced, do not weaken)
+
+1. `clean` is a dry run by default. Only `--apply` deletes.
+2. `--apply` requires `worktree_state(catalogs) == CLEAN` unless `--force`. "Not a repo"
+   and "git missing" are unknown and refused (exit `2`). Only the catalogs are checked.
+3. Only whole `.imageset` directories strictly inside an audited catalog are deleted.
+   Symlinked sets are unlinked; their targets are never touched.
+4. Duplicates are never auto-removed, and ignored assets are never reported or removed.
+5. After `--apply`, scan again so the report and `--fail-on` reflect what remains.
+
+## Public contracts
+
+**JSON** (built in `models.py`, pinned by `tests/test_models.py`): only add keys.
+Renaming or removing one needs a version bump and an `action.yml` update.
 
 ```text
-cli.audit / cli.clean ─▶ _prepare (paths, config, --fail-on) ─▶ run_audit ─▶ AssetScanner.scan
-                                                                    ├─ catalog.find_imagesets / parse_imageset (per catalog)
-                                                                    ├─ references.collect_used_references → References.uses(name)
-                                                                    └─ duplicates.find_duplicate_images
-   clean only: plan_removal(report) ─▶ worktree_state ─▶ apply_removal ─▶ re-scan
-   output: reporting.* to stdout, JSON to stdout / --report-json, Markdown to --summary-file
+xcassets_path (first catalog, legacy)  xcassets_paths[]  source_path  total_assets
+summary.{total_assets, used_assets_count, unused_assets_count, ignored_assets_count,
+         total_issues, total_duplicate_images, total_wasted_space_bytes}
+issues[].{asset_name, issue_type, detail, path}    duplicate_images[].{sha256,
+         file_size_bytes, files[], wasted_space_bytes}
+clean.{applied, count, reclaimed_bytes, imagesets[].{asset_name, path, size_bytes}}
 ```
 
-Dependency direction: `cli → {scanner, cleaner, reporting} → {catalog, references,
-duplicates} → {config, models}`. `models` and `config` import nothing from the
-package. Keep it that way, with no cycles.
+**Exit codes** (constants in `cli.py`): `0` no `--fail-on` category matched (findings
+alone still exit `0`), `1` a `--fail-on` category matched, `2` usage/config error or git
+safety refusal, `3` `OSError` while scanning, deleting, or writing a report, `77`
+permission denied, `130` interrupted. `--summary-file` appends; `--report-json` overwrites.
 
-### Where new work goes
+## Conventions and testing
 
-| Feature | Module |
+- Ruff `select = ["ALL"]` (minus docstrings), line length 100, `ty` warnings are errors
+  (`src/` only). Fix the cause instead of adding `noqa`. Common trips: put exception text
+  in a `msg` variable before `raise`; no `print`; boolean parameters are keyword-only.
+- Shared data models live in `models.py` as frozen dataclasses with no I/O. `models` and
+  `config` import nothing from the package.
+- `pathlib.Path` everywhere, `encoding="utf-8"`, sorted (deterministic) output. Walk
+  project trees with `Path.walk()` and prune `excluded_dirs`; no `rglob` over a project.
+- stdout carries only the report; diagnostics and errors go to stderr via `_fail` /
+  `_print_error`, and each error names a way to fix it.
+- New CLI options are `Annotated` aliases shared by both commands. Action inputs are
+  passed via `env:`, never interpolated into `run:`. Workflow actions stay SHA-pinned.
+- Git: feature branches, PRs to `main`, conventional commits; never commit `docs/private/`.
+- pytest + `tmp_path`, no real Xcode projects. `test_scanner.py` also covers `catalog.py`
+  and `duplicates.py`. CLI tests use `CliRunner` on `cli.app` and stub with
+  `monkeypatch.setattr(cli, "run_audit", lambda *_args: report)` / `cli.worktree_state`.
+- `action-smoke` in `ci.yml` runs the action on `examples/SampleApp` and expects 9 assets:
+  7 used, 1 ignored, 1 unused (`unused_promo`, the only one removed), 1 duplicate group.
+
+## Change checklist
+
+| When you change… | Also update |
 | --- | --- |
-| New reference syntax / file type | `references.py` (keep it conservative, see below) |
-| New catalog check (idioms, colorsets…) | `catalog.py`, new `IssueType` member (+ `category`) |
-| New config key | `config.py` (`CONFIG_KEYS`, validation, `load_scanner_config`) and `docs/ci.md` |
-| New removal behavior | `cleaner.py` (planning stays pure; deletion only in `apply_removal`) |
-| New CLI option | `cli.py`: define it once as an `Annotated` alias and share it between commands |
-| New output format (SARIF, JUnit…) | `reporting.py`, wired through `_write_outputs` |
-| New action input/output | `action.yml`, pass it via `env:` (never interpolate `${{ }}` into `run:`), plus the smoke test |
-
-## Reference detection is conservative, by design
-
-`References.uses(name)` returns True if the asset **might** be used:
-
-- an exact string literal anywhere in `.swift/.m/.mm/.h` (comments are stripped), or
-  any IB attribute value, or any plist `<string>`;
-- a dynamic pattern built from interpolation or format strings (`"icon_\(i)"` →
-  `icon_.*`). A pattern needs ≥ 2 alphanumeric literal characters, otherwise
-  `"\(a)_\(b)"` would match everything;
-- any `swift_symbol_candidates(name)` appearing as an implicit member (`.logo`) or as
-  `ImageResource|UIImage|NSImage|Image.logo`. Candidates over-approximate Xcode's
-  naming (stripped `Image` suffix, lowered acronyms, `_` before a leading digit, last
-  namespace component).
-
-When you change detection, a missed reference (false "unused") is a release-blocking
-bug, while an extra match (false "used") is acceptable. Every fix needs a test in
-`tests/test_references.py`. If the reference style is realistic, also add it to
-`examples/SampleApp`.
-
-## Conventions
-
-- **Ruff `select = ["ALL"]`**, line length 100, and `ty` with warnings treated as
-  errors. Fix the cause rather than adding `noqa`. If a suppression is unavoidable,
-  scope it to one rule code and give a reason.
-- Annotate every public function. Use builtin generics (`list[str]`, `X | None`).
-  Make helper parameters keyword-only (`*,`).
-- **All shared data models live in `models.py`** (report, issues, duplicates, removal
-  plan). They are `@dataclass(frozen=True)` value objects with no I/O (`AuditReport`
-  is mutable only for test convenience). Modules hold behavior; `models.py` holds data.
-  Exceptions: module-private helpers (`catalog.ParsedImageset`,
-  `references.References`, `cleaner.WorktreeState`) and configuration
-  (`config.ScannerConfig`).
-- **The JSON shape is a public contract** that CI scripts and `action.yml` parse:
-  `summary.*`, `issues[]`, `duplicate_images[]`, `clean.{applied,count,reclaimed_bytes,imagesets}`.
-  Only add keys. Renaming or removing one needs a version bump and an update to
-  `action.yml`. (`xcassets_path` is kept as the first catalog for pre-0.2 consumers.)
-- Use `pathlib.Path` everywhere. Read text with `encoding="utf-8"`. Walk directories
-  with `Path.walk()` and prune `excluded_dirs`, never with `rglob` over a whole project.
-- Output must be deterministic: sort file lists, issues, groups, and plan entries.
-- **stdout carries only the report.** Diagnostics, `-v` output, and errors go to stderr.
-  Colors turn off for non-TTY output and `NO_COLOR`. Non-TTY output uses a 160-column
-  width so CI logs do not wrap paths.
-- Exit codes are constants in `cli.py`: `0` OK, `1` `--fail-on` matched, `2` usage/config
-  error or git safety refusal, `3` runtime error, `77` permission denied, `130`
-  interrupted. CI users depend on them, so don't change their meaning.
-- Write user-facing errors with `_print_error` / `_fail(console, message, solutions, code)`.
-
-## Testing
-
-- pytest with the `tmp_path` fixture. Build fake catalogs on disk with
-  `_create_imageset` (scanner tests) or `_add_imageset` (CLI tests).
-- Test the CLI with `typer.testing.CliRunner`. Stub the scan with
-  `monkeypatch.setattr(cli, "run_audit", lambda *_args: report)`, and stub the git check
-  with `monkeypatch.setattr(cli, "worktree_state", ...)`.
-- Every new pattern or check needs both a positive and a negative test.
-- The action is exercised end to end in `.github/workflows/ci.yml` (`action-smoke`)
-  against `examples/SampleApp`. Keep its expected counts in sync if you change the
-  sample.
-
-## Safety rules for removal (enforced, don't weaken)
-
-1. `clean` is a **dry run by default**. Only `--apply` deletes.
-2. `--apply` requires `worktree_state(catalogs) == CLEAN` (no uncommitted git changes in
-   the catalogs) unless `--force` is passed. "Not a repo" or "git missing" counts as
-   unknown and is refused.
-3. Only whole `.imageset` directories that are **inside an audited catalog** are
-   deleted (`_is_inside_any`). Symlinked image sets are unlinked; their targets are
-   never touched.
-4. Duplicates are **never** auto-removed. Removing one safely means rewriting source
-   references, which a pre-build CI step must not do silently.
-5. Ignored assets (`ignore` / `--ignore`) are never reported as unused or removed.
-6. After `--apply`, re-scan so the final report and `--fail-on` reflect what remains.
+| Reference detection | `tests/test_references.py`, `examples/SampleApp` (+ smoke counts), `README.md`, `docs/ci.md` |
+| CLI option or config key | `cli.py` / `config.py` (`CONFIG_KEYS`), their tests, `README.md`, `docs/ci.md` |
+| `IssueType` | `IssueType.category`, `tests/test_models.py`, `README.md`, `docs/ci.md` |
+| JSON shape | `to_dict`, `tests/test_models.py`, the Python snippet in `action.yml` |
+| Action inputs/outputs | `action.yml`, the `action-smoke` job, `docs/ci.md` |
+| Version | `pyproject.toml`, `uv lock`, pinned `@vX.Y.Z` / `==X.Y.Z` in `README.md`, `docs/ci.md` (release tag must be `v` + version; never tag or release unless asked) |
 
 ## Known gaps
 
-- `.colorset`, `.symbolset`, `.dataset`, and app icons are not scanned (only `.imageset`).
-- Names that are fully computed at runtime (server-driven, concatenated with `+`) cannot
-  be detected. Users must add them to `ignore`. This is documented in `docs/ci.md`.
-- Duplicate detection is byte-exact and per file. It does not find re-exported images
-  that look identical but differ in bytes, and it does not group at the asset level
-  (all scales of set A == set B).
-- Swift string tokenizing is regex-based. Interpolations that contain quotes
-  (`"\(d["k"])"`) or raw strings with `\#(` may be mis-tokenized. The failure is
-  usually harmless (an extra "used" match).
-- Reported paths in text/Markdown are relative to the source dir. JSON paths are
-  exactly as resolved from the CLI arguments.
-
-## Roadmap
-
-1. Asset-level duplicate groups, plus an opt-in `dedupe` command that rewrites string
-   references to a canonical asset (local use only, never in CI).
-2. More output formats: SARIF (GitHub code scanning) and JUnit XML (Jenkins test UI).
-3. `.colorset` / `.symbolset` support.
-
-## Git
-
-Work on feature branches. `main` is the PR base. Use conventional commits
-(`feat(cli): …`, `fix(references): …`, `docs: …`). Never commit `.venv`, caches,
-`.coverage`, or `docs/private/`.
+- Names computed at runtime (server-driven, `+` concatenation, case conversion) cannot be
+  detected; users add them to `ignore`. JSON, YAML, `.strings`, and `project.pbxproj`
+  are not scanned, nor is anything outside `--source`.
+- Only `.imageset` is scanned. Duplicate detection is byte-exact and per file, not per asset.
