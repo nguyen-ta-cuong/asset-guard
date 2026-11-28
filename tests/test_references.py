@@ -131,22 +131,22 @@ def test_implicit_members_after_operators_and_line_breaks(sources, code, symbols
 
 
 @pytest.mark.parametrize(
-    ("code", "asset"),
+    ("code", "asset", "sibling"),
     [
-        ("Image(.onboardingHero)", "onboarding/hero"),  # flattened symbol
-        ("Image(.onboardingHero)", "Onboarding/hero"),
-        ("Image(.vipBadge)", "VIP/badge"),
-        ("Image(.VIP.badge)", "VIP/badge"),
-        ("Image(.abcLogo)", "ABC_logo"),
+        ("Image(.onboardingHero)", "onboarding/hero", "onboarding/other"),  # flattened symbol
+        ("Image(.onboardingHero)", "Onboarding/hero", "Onboarding/other"),
+        ("Image(.vipBadge)", "VIP/badge", "VIP/other"),
+        ("Image(.VIP.badge)", "VIP/badge", "VIP/other"),
+        ("Image(.abcLogo)", "ABC_logo", "ABC_other"),
     ],
 )
-def test_flattened_namespace_symbols_keep_the_asset(sources, code, asset):
+def test_flattened_namespace_symbols_keep_the_asset(sources, code, asset, sibling):
     _write(sources, "View.swift", code)
 
     refs = collect_used_references(sources)
 
     assert refs.uses(asset)
-    assert not refs.uses("onboarding/other")
+    assert not refs.uses(sibling)
 
 
 def test_name_spellings():

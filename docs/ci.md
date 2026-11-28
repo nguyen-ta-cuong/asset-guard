@@ -35,8 +35,9 @@ Folders with **Provides Namespace** ticked are resolved: an image set `hero` ins
 - says `Image("onboarding/hero")`;
 - uses a generated symbol, nested (`Image(.Onboarding.hero)`,
   `ImageResource.Onboarding.hero`) or flattened (`Image(.onboardingHero)`);
-- contains the end of the name as a string or dynamic name (`"hero"`, `"/hero"`,
-  `"/hero_\(i)"`), because the folder prefix may be added with `+`.
+- contains the end of the name as a string (`"hero"`, `"/hero"`), because the folder
+  prefix may be added with `+`. Dynamic names work the same way: `"/hero_\(i)"` keeps
+  `onboarding/hero_1`.
 
 No ignore glob is needed for these. Folders without the tick do not change the name.
 A symbol counts after any capitalised name (`Asset.hero`, `Theme.hero`), so an asset
