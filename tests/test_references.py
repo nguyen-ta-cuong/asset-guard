@@ -121,6 +121,98 @@ def test_objective_c_literals_and_format_strings(sources):
     assert not refs.uses("objc_commented")
 
 
+def test_quote_inside_multiline_string_does_not_hide_later_literals(sources):
+    _write(
+        sources,
+        "Help.swift",
+        """
+        let help = \"\"\"
+        The screen is 5" wide
+        multiline_name
+        multiline_\\(index)
+        \"\"\"
+        let a = Image("after_multiline")
+        // Image("commented_after_multiline")
+        let b = UIImage(named: "second_after_multiline")
+        """,
+    )
+
+    refs = collect_used_references(sources)
+
+    assert refs.uses("after_multiline")
+    assert refs.uses("second_after_multiline")
+    assert refs.uses("multiline_name")
+    assert refs.uses("multiline_7")
+    assert not refs.uses("commented_after_multiline")
+    assert not refs.uses("let a = Image(")
+    assert not refs.uses("never_mentioned")
+
+
+def test_swift_raw_strings_keep_the_tokenizer_in_sync(sources):
+    _write(
+        sources,
+        "Raw.swift",
+        """
+        let quoted = #"She said "hi" and left"#
+        let a = Image(#"raw_name"#)
+        let b = Image(#"raw_\\#(index)"#)
+        let c = ##"double "# hash"##
+        let block = #\"\"\"
+        An odd " quote and a fake end \"\"\" here
+        raw_block_name
+        raw_block_\\#(index)
+        \"\"\"#
+        let d = Image("after_raw")
+        // Image("commented_after_raw")
+        """,
+    )
+
+    refs = collect_used_references(sources)
+
+    for used in ["raw_name", "raw_3", "raw_block_name", "raw_block_9", "after_raw"]:
+        assert refs.uses(used), used
+    assert not refs.uses("commented_after_raw")
+    assert not refs.uses("never_mentioned")
+
+
+def test_objc_char_literal_quote_does_not_hide_later_literals(sources):
+    _write(
+        sources,
+        "Chars.m",
+        """
+        char quote = '"';
+        char apostrophe = '\\'';
+        UIImage *a = [UIImage imageNamed:@"after_char_literal"];
+        // [UIImage imageNamed:@"commented_after_char"];
+        UIImage *b = [UIImage imageNamed:@"second_after_char"];
+        """,
+    )
+
+    refs = collect_used_references(sources)
+
+    assert refs.uses("after_char_literal")
+    assert refs.uses("second_after_char")
+    assert not refs.uses("commented_after_char")
+    assert not refs.uses("never_mentioned")
+
+
+def test_unbalanced_quote_only_affects_its_own_line(sources):
+    _write(
+        sources,
+        "Broken.swift",
+        """
+        let broken = "unterminated
+        let a = Image("next_line_name")
+        // Image("commented_after_broken")
+        """,
+    )
+
+    refs = collect_used_references(sources)
+
+    assert refs.uses("next_line_name")
+    assert not refs.uses("commented_after_broken")
+
+
 def test_interface_builder_and_plist_values(sources):
     _write(
         sources,

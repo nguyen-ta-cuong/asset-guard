@@ -24,7 +24,20 @@ CODE_EXTENSIONS: frozenset[str] = frozenset({".swift", ".m", ".mm", ".h"})
 INTERFACE_BUILDER_EXTENSIONS: frozenset[str] = frozenset({".storyboard", ".xib"})
 PLIST_EXTENSIONS: frozenset[str] = frozenset({".plist"})
 
-_CODE_TOKEN = re.compile(r'"(?:\\.|[^"\\])*"|//[^\n]*|/\*[\s\S]*?\*/')
+# Tokenizers split a file into string literals and skipped spans (comments, C char
+# literals) in one left-to-right pass, so a quote inside a comment, or `//` inside a
+# string, is never misread. A single-line literal cannot span lines: an unbalanced quote
+# then costs one line at most, instead of inverting every later literal in the file.
+_COMMENT = r"//[^\n]*|/\*[\s\S]*?\*/"
+_STRING = r'"(?:\\.|[^"\\\n])*"'
+_SWIFT_TOKEN = re.compile(
+    r'(?P<block_hashes>#+)"""(?P<raw_block>[\s\S]*?)"""(?P=block_hashes)'  # #"""…"""#
+    r'|"""(?P<block>(?:\\[\s\S]|[^\\])*?)"""'  # """…""" (may hold bare quotes)
+    r'|(?P<raw_hashes>#+)"(?P<raw>[^\n]*?)"(?P=raw_hashes)'  # #"…"#
+    rf"|(?P<plain>{_STRING})|{_COMMENT}"
+)
+# C / Objective-C: char literals such as `'"'` must not open a string.
+_C_TOKEN = re.compile(rf"(?P<plain>{_STRING})|'(?:\\.|[^'\\\n])+'|{_COMMENT}")
 _SWIFT_INTERPOLATION = re.compile(r"\\\((?:[^()]|\([^()]*\))*\)")
 # printf-style specifiers: %d, %@, %02ld, %1$s, ...
 _FORMAT_SPECIFIER = re.compile(
@@ -108,6 +121,32 @@ def _literal_to_pattern(content: str) -> re.Pattern[str] | None:
     return re.compile(".*".join(re.escape(part) for part in literal_parts), re.DOTALL)
 
 
+def _token_literals(match: re.Match[str]) -> list[str] | None:
+    """Return the string contents of a token, or None for a comment / char literal."""
+    groups = match.groupdict()
+    plain = groups.get("plain")
+    if plain is not None:
+        return [plain[1:-1]]
+    raw = groups.get("raw")
+    if raw is not None:
+        return [_unraw(raw, groups["raw_hashes"])]
+    raw_block = groups.get("raw_block")
+    if raw_block is not None:
+        return _block_lines(_unraw(raw_block, groups["block_hashes"]))
+    block = groups.get("block")
+    return None if block is None else _block_lines(block)
+
+
+def _unraw(content: str, hashes: str) -> str:
+    r"""Rewrite raw-string interpolation `\#(x)` as `\(x)` so it becomes a pattern."""
+    return content.replace(f"\\{hashes}(", "\\(")
+
+
+def _block_lines(content: str) -> list[str]:
+    """Each line of a multi-line string may be an asset name on its own."""
+    return [line.strip() for line in content.splitlines()]
+
+
 def _scan_code(
     content: str,
     *,
@@ -118,21 +157,19 @@ def _scan_code(
 ) -> None:
     code_chunks: list[str] = []
     last_end = 0
-    for match in _CODE_TOKEN.finditer(content):
+    for match in (_SWIFT_TOKEN if is_swift else _C_TOKEN).finditer(content):
         code_chunks.append(content[last_end : match.start()])
         last_end = match.end()
-        token = match.group(0)
-        if not token.startswith('"'):
-            continue  # comment
+        literals = _token_literals(match)
+        if literals is None:
+            continue  # comment or char literal
         code_chunks.append('""')
-        literal = token[1:-1]
-        if not literal or "\n" in literal:
-            continue
-        pattern = _literal_to_pattern(literal)
-        if pattern is None:
-            names.add(literal)
-        else:
-            patterns.setdefault(pattern.pattern, pattern)
+        for literal in filter(None, literals):
+            pattern = _literal_to_pattern(literal)
+            if pattern is None:
+                names.add(literal)
+            else:
+                patterns.setdefault(pattern.pattern, pattern)
     code_chunks.append(content[last_end:])
 
     if is_swift:
